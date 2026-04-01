@@ -2,7 +2,6 @@ package com.example.bank.controllers;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.introspect.TypeResolutionContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,10 +19,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @EnableAsync
 public class NamingController {
     private final Map<Integer, String> ipAddresses = new ConcurrentHashMap<>();
-    private final Map<Integer, String> nodeToFile = new ConcurrentHashMap<>();
+    private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
     private ObjectMapper mapper;
     private File ipFile = new File("ipAddresses.json");
-    private File nodeFile = new File("nodeToFile.json");
 
     public NamingController() {
         mapper = new ObjectMapper();
@@ -35,17 +34,6 @@ public class NamingController {
                 System.out.println("Loaded IP addresses from file.");
             } catch (IOException e) {
                 System.err.println("Could not parse ipAddresses.json: " + e.getMessage());
-            }
-        }
-
-        // Load Node to File mappings
-        if (nodeFile.exists()) {
-            try {
-                Map<Integer, String> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, String>>() {});
-                this.nodeToFile.putAll(loadedNodes);
-                System.out.println("Loaded node mappings from file.");
-            } catch (IOException e) {
-                System.err.println("Could not parse nodeToFile.json: " + e.getMessage());
             }
         }
     }
@@ -68,38 +56,38 @@ public class NamingController {
         return hash;
     }
 
-    @PostMapping("/{name}/fileMade/{file}")
-    public ResponseEntity informFileCreation(@PathVariable String name, @PathVariable String file) {
-        int hashFile = hashingFunction(file);
-        int hashName = hashingFunction(name);
-        if(!ipAddresses.containsKey(hashName)){
-            return ResponseEntity.notFound().build();
+    @GetMapping("/{fileName}/file-store")
+    public ResponseEntity<String> determineNodeToStore(@PathVariable String fileName) {
+        int hashFile = hashingFunction(fileName);
+        if(ipAddresses.isEmpty()){
+            return ResponseEntity.badRequest().body("no ip adresses on naming server");
+        }
+        int smallestHashDifference = Collections.max(ipAddresses.keySet());
+        for (Integer i : ipAddresses.keySet()) {
+            if(i>hashFile) continue;
+            if (hashFile - i < Math.abs(smallestHashDifference - i)) { // absolute value bcus init can be negative
+                smallestHashDifference = hashFile;
+            }
+
         }
 
-        nodeToFile.put(hashFile, file);
-        try {
-            // writeValue(File, Object) serializes and saves
-            mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, nodeToFile);
-            System.out.println("JSON written successfully!");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return ResponseEntity.ok().build();
+        fileToNodeIP.put(hashFile, ipAddresses.get(smallestHashDifference));
+        return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
     }
 
     @GetMapping("/{file}/fileSearch")
     public ResponseEntity<String> getNodeWhichHasFile(@PathVariable String file) {
         int hash = hashingFunction(file);
-        if(!nodeToFile.containsKey(hash)){
+        if(!fileToNodeIP.containsKey(hash)){
             return ResponseEntity.notFound().build();
         }
-        String nodeName = nodeToFile.get(hashingFunction(file));
+        String ip = fileToNodeIP.get(hashingFunction(file));
 
-        return ResponseEntity.ok(nodeName);
+        return ResponseEntity.ok(ip);
     }
     // Get current account balance
     @GetMapping("/{name}/get")
-    public ResponseEntity<String> getBalance(@PathVariable String name) {
+    public ResponseEntity<String> getIPByNode(@PathVariable String name) {
         String resultIP = ipAddresses.getOrDefault(hashingFunction(name), "error");
         return ResponseEntity.ok(resultIP);
     }
@@ -108,6 +96,9 @@ public class NamingController {
     @PostMapping("/{name}/add")
     public ResponseEntity<String> addIP(@PathVariable String name, HttpServletRequest request) {
         String clientIp = request.getRemoteAddr();
+        if(ipAddresses.containsValue(clientIp)){
+            return ResponseEntity.ok("IP already added");
+        }
         Integer hash = hashingFunction(name);
         if(ipAddresses.containsKey(hash)){
             return ResponseEntity.status(HttpStatus.CONFLICT)
