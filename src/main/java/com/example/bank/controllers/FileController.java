@@ -1,26 +1,43 @@
 package com.example.bank.controllers;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.bank.services.FileClientService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 @RestController
-@RequestMapping("/naming")
+@RequestMapping("/node")
 @EnableAsync
 public class FileController {
-    private final Map<Integer, String> filePaths = new ConcurrentHashMap<>();
+    public static final Logger logger = LoggerFactory.getLogger(FileController.class);
+    private final FileClientService fileClientService;
+    private final String uploadDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
+
+    public FileController(FileClientService fileClientService) {
+        this.fileClientService = fileClientService;
+    }
 
     private Integer hashingFunction(String input){
         int hash = 0;
@@ -40,35 +57,65 @@ public class FileController {
         return hash;
     }
 
+    @PostMapping("/upload")
+    public ResponseEntity<Resource> uploadFile(@RequestParam("file") MultipartFile file) {
+        String filename = file.getOriginalFilename();
+        RestClient restClient = RestClient.create();
 
-    // download request from other users
-    @GetMapping("/{name}/download")
-    public ResponseEntity<Resource> provideDownload(@PathVariable String name) {
-        int hash = hashingFunction(name);
-
-        if (!filePaths.containsKey(hash)) {
-            return ResponseEntity.notFound().build();
-        }
-
-        String pathFile = filePaths.get(hash);
-        File file = new File(pathFile);
-
-        if (!file.exists()) {
-            return ResponseEntity.notFound().build();
-        }
-
-        Resource resource = new FileSystemResource(file);
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM) // Generic binary data
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getName() + "\"")
-                .body(resource);
+        String result = restClient.get()
+                .uri("http://localhost:8081/naming/{filename}/file-store", filename)
+                .retrieve()
+                .body(String.class);
+        logger.info(result);
+        fileClientService.uploadFile(result, file);
+        return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/{name}/get")
-    public ResponseEntity<String> getFile(@PathVariable String name) {
 
-        return ResponseEntity.ok(resultIP);
+    // download request from other users
+    @GetMapping("/{fileName}/download")
+    public ResponseEntity<Resource> provideDownload(@PathVariable String fileName, HttpServletRequest request) {
+        File file = new File(uploadDirectory + File.separator + fileName);
+        String url = request.getRemoteAddr();
+        if (file.exists() && file.isFile()){
+            // 3. Wrap it in a Resource
+            Resource resource = new FileSystemResource(file);
+
+            // 4. Return it with the correct headers so the browser knows it's a file
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM) // Generic binary data
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getName() + "\"")
+                    .body(resource);
+        }
+        return ResponseEntity.notFound().build();
+    }
+
+    @PostMapping("/receive")
+    public ResponseEntity<String> getFile(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body("Please select a file to upload.");
+        }
+
+        try {
+            // 2. Create the directory if it doesn't exist
+            File directory = new File(uploadDirectory);
+            if (!directory.exists()) {
+                directory.mkdirs();
+            }
+
+            // 3. Create the full path for the new file
+            String fileName = file.getOriginalFilename();
+            File destinationFile = new File(uploadDirectory + File.separator +fileName);
+
+            // 4. Save the file to the local disk
+            file.transferTo(destinationFile);
+
+            return ResponseEntity.ok("File saved successfully to: " + destinationFile.getAbsolutePath());
+
+        } catch (IOException e) {
+            logger.error("Could not save file: ", e);
+            return ResponseEntity.internalServerError().body("Failed to save file: " + e.getMessage());
+        }
     }
 
 
