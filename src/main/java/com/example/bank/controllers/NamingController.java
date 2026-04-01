@@ -22,6 +22,7 @@ public class NamingController {
     private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
     private ObjectMapper mapper;
     private File ipFile = new File("ipAddresses.json");
+    private File nodeFile = new File("fileToNodeIP.json");
 
     public NamingController() {
         mapper = new ObjectMapper();
@@ -34,6 +35,16 @@ public class NamingController {
                 System.out.println("Loaded IP addresses from file.");
             } catch (IOException e) {
                 System.err.println("Could not parse ipAddresses.json: " + e.getMessage());
+            }
+        }
+
+        if (nodeFile.exists()) {
+            try {
+                Map<Integer, String> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, String>>() {});
+                this.fileToNodeIP.putAll(loadedNodes);
+                System.out.println("Loaded node mappings from file.");
+            } catch (IOException e) {
+                System.err.println("Could not parse nodeToFile.json: " + e.getMessage());
             }
         }
     }
@@ -72,6 +83,13 @@ public class NamingController {
         }
 
         fileToNodeIP.put(hashFile, ipAddresses.get(smallestHashDifference));
+        try {
+            // writeValue(File, Object) serializes and saves
+            mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
+            System.out.println("JSON written successfully!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
     }
 
