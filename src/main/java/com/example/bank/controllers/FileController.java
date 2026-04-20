@@ -1,6 +1,7 @@
 package com.example.bank.controllers;
 
 import com.example.bank.services.FileClientService;
+import com.example.bank.services.HashingService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ public class FileController {
     public static final Logger logger = LoggerFactory.getLogger(FileController.class);
     private final FileClientService fileClientService;
     private final String uploadDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
+    private final HashingService hashingService = new HashingService();
 
     public FileController(FileClientService fileClientService) {
         this.fileClientService = fileClientService;
@@ -50,6 +52,24 @@ public class FileController {
                 .body(String.class);
         logger.info(result);
         fileClientService.uploadFile(result, file);
+        return ResponseEntity.ok().build();
+    }
+
+    // received from naming server
+    @PostMapping("/discover-response/{numNodes}")
+    public ResponseEntity<Resource> discoverResponse(@RequestParam int numNodes) {
+        fileClientService.setNumNodes(numNodes);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/neighbour-mapping/{nodeName}/{typeNeighbour}")
+    public ResponseEntity<Resource> setNeighbour(@RequestParam String nodeName, @RequestParam String typeNeighbour) {
+        int hash = hashingService.hashingFunction(nodeName);
+        if(typeNeighbour.equals("previous")){
+            fileClientService.setPreviousNode(hash);
+        } else{
+            fileClientService.setNextNode(hash);
+        }
         return ResponseEntity.ok().build();
     }
 
