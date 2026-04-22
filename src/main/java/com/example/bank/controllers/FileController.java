@@ -57,13 +57,13 @@ public class FileController {
 
     // received from naming server
     @PostMapping("/discover-response/{numNodes}")
-    public ResponseEntity<Resource> discoverResponse(@RequestParam int numNodes) {
+    public ResponseEntity<Resource> discoverResponse(@PathVariable int numNodes) {
         fileClientService.setNumNodes(numNodes);
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/neighbour-mapping/{nodeName}/{typeNeighbour}")
-    public ResponseEntity<Resource> setNeighbour(@RequestParam String nodeName, @RequestParam String typeNeighbour) {
+    public ResponseEntity<Resource> setNeighbour(@PathVariable String nodeName, @PathVariable String typeNeighbour) {
         int hash = hashingService.hashingFunction(nodeName);
         if(typeNeighbour.equals("previous")){
             fileClientService.setPreviousNode(hash);

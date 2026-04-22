@@ -4,7 +4,9 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -17,9 +19,8 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.MulticastSocket;
+import java.net.*;
+import java.util.Enumeration;
 
 @Service
 public class FileClientService {
@@ -35,10 +36,6 @@ public class FileClientService {
 
     @Value("${app.nodename}")
     private String nodeName;
-
-    public FileClientService() {
-        this.currentNode = this.nextNode = this.previousNode = hashingService.hashingFunction(nodeName);
-    }
 
     public int getNumNodes() {
         return numNodes;
@@ -79,12 +76,39 @@ public class FileClientService {
         }
     }
 
-    @PostConstruct
     public void discoverNodes(){
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+                // Filters out 127.0.0.1 and inactive interfaces
+                if (iface.isLoopback() || !iface.isUp()) continue;
+
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    // Check for IPv4 address
+                    if (addr.getHostAddress().contains(":")) continue;
+
+                    System.out.println(iface.getDisplayName() + " IP: " + addr.getHostAddress());
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        this.currentNode = this.nextNode = this.previousNode = hashingService.hashingFunction(nodeName);
         sendMulticast("discover "+nodeName);
     }
 
-    @Bean
+    @EventListener(ApplicationReadyEvent.class)
+    public void onApplicationReady() {
+        // 1. Start the listener in a BACKGROUND thread so it doesn't block Spring
+        new Thread(this::receiveMessages).start();
+
+        // 2. Now run your discovery logic
+        discoverNodes();
+    }
+
     public void receiveMessages() {
         try (MulticastSocket socket = new MulticastSocket(PORT)) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
@@ -101,23 +125,26 @@ public class FileClientService {
                 String received = new String(packet.getData(), 0, packet.getLength());
                 if(received.startsWith("discover")){
                     String[] parts = received.split(" ");
-                    String receivedNodeName = parts[1];
-                    int hash = hashingService.hashingFunction(receivedNodeName);
-                    if (previousNode==currentNode && nextNode==currentNode){
-                        previousNode = hash;
-                        nextNode = hash;
-                        RestClient restClient = RestClient.create();
+                    if(parts.length>1){
+                        String receivedNodeName = parts[1];
+                        int hash = hashingService.hashingFunction(receivedNodeName);
+                        if (previousNode==currentNode && nextNode==currentNode && currentNode!=hash && !receivedNodeName.contains("naming")){
+                            previousNode = hash;
+                            nextNode = hash;
+                            RestClient restClient = RestClient.create();
 
-                        String result = restClient.get()
-                                .uri("http://localhost:8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
-                                .retrieve()
-                                .body(String.class);
-                        logger.info(result);
-                        String result2 = restClient.get()
-                                .uri("http://localhost:8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
-                                .retrieve()
-                                .body(String.class);
-                        logger.info(result2);
+                            String result = restClient.post()
+                                    .uri("http://localhost:8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
+                                    .retrieve()
+                                    .body(String.class);
+                            logger.info(result);
+                            String result2 = restClient.post()
+                                    .uri("http://localhost:8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
+                                    .retrieve()
+                                    .body(String.class);
+                            logger.info(result2);
+                        }
+
                     }
 
                 }
