@@ -7,7 +7,9 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -16,9 +18,8 @@ import org.springframework.web.client.RestClient;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.MulticastSocket;
+import java.net.*;
+import java.util.Enumeration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -31,7 +32,6 @@ public class MulticastHandler {
     private final String GROUP_ADDRESS = "230.0.0.0";
     private final int PORT = 4446;
     private final HashingService hashingService = new HashingService();
-    private final NamingController namingController = new NamingController();
 
     public Map<Integer, String> getIpAddresses() {
         return ipAddresses;
@@ -107,9 +107,36 @@ public class MulticastHandler {
         }
     }
 
-    @PostConstruct
+    @EventListener(ApplicationReadyEvent.class)
+    public void onApplicationReady() {
+        // 1. Start the listener in a BACKGROUND thread so it doesn't block Spring
+        new Thread(this::receiveMessages).start();
+
+        // 2. Now run your discovery logic
+        discoverNodes();
+    }
+
     public void discoverNodes(){
-        sendMulticast("discover");
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+                // Filters out 127.0.0.1 and inactive interfaces
+                if (iface.isLoopback() || !iface.isUp()) continue;
+
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    // Check for IPv4 address
+                    if (addr.getHostAddress().contains(":")) continue;
+
+                    System.out.println(iface.getDisplayName() + " IP: " + addr.getHostAddress());
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        sendMulticast("discover "+nodeName);
 
 //        RestClient restClient = RestClient.create();
 //        // init of node, change name when making second etc node
@@ -119,7 +146,6 @@ public class MulticastHandler {
 //                .body(String.class);
     }
 
-    @Bean
     public void receiveMessages() {
         try (MulticastSocket socket = new MulticastSocket(PORT)) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
@@ -155,8 +181,8 @@ public class MulticastHandler {
                     ipAddresses.put(hashNodeName, clientIp);
                     RestClient restClient = RestClient.create();
 
-                    String result = restClient.get()
-                            .uri("http://localhost:8080/node/discover-response/{numNodes}", numNodes)
+                    String result = restClient.post()
+                            .uri("http://"+clientIp+":8080/node/discover-response/{numNodes}", numNodes)
                             .retrieve()
                             .body(String.class);
                     logger.info(result);
