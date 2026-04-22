@@ -1,6 +1,6 @@
 package com.example.bank.controllers;
 
-import com.example.bank.services.FileClientService;
+import com.example.bank.services.NodeService;
 import com.example.bank.services.HashingService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -8,41 +8,36 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/node")
 @EnableAsync
 public class FileController {
     public static final Logger logger = LoggerFactory.getLogger(FileController.class);
-    private final FileClientService fileClientService;
+    private final NodeService nodeService;
     private final String uploadDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
     private final HashingService hashingService = new HashingService();
 
-    public FileController(FileClientService fileClientService) {
-        this.fileClientService = fileClientService;
+    public FileController(NodeService nodeService) {
+        this.nodeService = nodeService;
+    }
+
+    @GetMapping("/nodename")
+    public ResponseEntity<String> getNodeName() {
+        return ResponseEntity.ok(nodeService.getNodeName());
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<Resource> uploadFile(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
         String filename = file.getOriginalFilename();
         RestClient restClient = RestClient.create();
 
@@ -51,24 +46,39 @@ public class FileController {
                 .retrieve()
                 .body(String.class);
         logger.info(result);
-        fileClientService.uploadFile(result, file);
+        nodeService.uploadFile(result, file);
         return ResponseEntity.ok().build();
     }
 
     // received from naming server
     @PostMapping("/discover-response/{numNodes}")
-    public ResponseEntity<Resource> discoverResponse(@PathVariable int numNodes) {
-        fileClientService.setNumNodes(numNodes);
+    public ResponseEntity<String> discoverResponse(@PathVariable int numNodes) {
+        nodeService.setNumNodes(numNodes);
+        logger.info(numNodes +" number of nodes");
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/neighbour-mapping/{nodeName}/{typeNeighbour}")
-    public ResponseEntity<Resource> setNeighbour(@PathVariable String nodeName, @PathVariable String typeNeighbour) {
-        int hash = hashingService.hashingFunction(nodeName);
+    public ResponseEntity<String> setNeighbour(@PathVariable String nodeName, @PathVariable String typeNeighbour, HttpServletRequest request) {
+        String ipadd = request.getRemoteAddr();
         if(typeNeighbour.equals("previous")){
-            fileClientService.setPreviousNode(hash);
+            nodeService.setPreviousNode(nodeName);
+            nodeService.setIpPreviousNode(ipadd);
         } else{
-            fileClientService.setNextNode(hash);
+            nodeService.setNextNode(nodeName);
+            nodeService.setIpNextNode(ipadd);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}")
+    public ResponseEntity<String> setNeighbourAfterDestroy(@PathVariable String nodeName, @PathVariable String typeNeighbour, @PathVariable String ipadd) {
+        if(typeNeighbour.equals("previous")){
+            nodeService.setPreviousNode(nodeName);
+            nodeService.setIpPreviousNode(ipadd);
+        } else{
+            nodeService.setNextNode(nodeName);
+            nodeService.setIpNextNode(ipadd);
         }
         return ResponseEntity.ok().build();
     }
