@@ -146,111 +146,93 @@ public class NodeService {
         discoverNodes();
     }
 
+    private void sendChangePrevious(RestClient restClient, String clientIp){
+        String result = restClient.post()
+                .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
+                .retrieve()
+                .body(String.class);
+        logger.info(result);
+    }
+
+    private void sendChangeNext(RestClient restClient, String clientIp){
+        String result2 = restClient.post()
+                .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
+                .retrieve()
+                .body(String.class);
+        logger.info(result2);
+    }
+
+    private void setPreviousNode(String nodeName, String ip, RestClient restClient) {
+        previousNode = nodeName;
+        ipPreviousNode = ip;
+        sendChangeNext(restClient, ip);
+    }
+
+    private void setNextNode(String nodeName, String ip, RestClient restClient) {
+        nextNode = nodeName;
+        ipNextNode = ip;
+        sendChangePrevious(restClient, ip);
+    }
+
+    private boolean isBetween(int start, int value, int end) {
+        if (start < end)
+            return start < value && value < end;
+
+        return value > start || value < end;
+    }
+
     public void receiveMessages() {
         try (MulticastSocket socket = new MulticastSocket(PORT)) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
-
             // On modern Java/VMs, it's safer to specify the interface
             socket.joinGroup(group);
 
             System.out.println("Listening for multicast on " + GROUP_ADDRESS + ":" + PORT);
-
+            RestClient restClient = RestClient.create();
             byte[] buf = new byte[256];
+
             while (true) {
+                ///packet setup
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 socket.receive(packet);
+
                 String received = new String(packet.getData(), 0, packet.getLength());
-                InetAddress senderAddress = packet.getAddress();
-
-                String clientIp = senderAddress.getHostAddress();
-                if(received.startsWith("discover")){
-                    String[] parts = received.split(" ");
-                    if(parts.length>1){
-                        RestClient restClient = RestClient.create();
-                        String receivedNodeName = parts[1];
-                        if(!receivedNodeName.contains("naming")) {
-                            int hashReceived = hashingService.hashingFunction(receivedNodeName);
-                            int hashCurrent = hashingService.hashingFunction(currentNode);
-                            int hashPrevious = hashingService.hashingFunction(previousNode);
-                            int hashNext = hashingService.hashingFunction(nextNode);
-                            // current node was the only node, received node is the 2nd
-                            if (Objects.equals(previousNode, currentNode) && Objects.equals(nextNode, currentNode) && !Objects.equals(currentNode, receivedNodeName)){
-                                previousNode = receivedNodeName;
-                                nextNode = receivedNodeName;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-                                String result2 = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result2);
-                            // current node is the smaller than the received hash
-                            // next node is bigger than the received hash
-                            } else if (hashCurrent < hashReceived && hashReceived < hashNext) {
-                                nextNode = receivedNodeName;
-                                ipNextNode = clientIp;
-                                String result2 = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result2);
-                            // current node is the bigger than the received hash
-                            // previous node is smaller than the received hash
-                            } else if (hashPrevious < hashReceived && hashReceived < hashCurrent) {
-                                previousNode = receivedNodeName;
-                                ipPreviousNode = clientIp;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-
-                            // BIGGEST NODE GETS ADDED 2 CASES
-                            // we are the smallest, and the biggest gets added
-                            } else if (hashPrevious > hashCurrent && hashPrevious < hashReceived) {
-                                previousNode = receivedNodeName;
-                                ipPreviousNode = clientIp;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-                            // we are the biggest, and a bigger get added
-                            } else if (hashNext < hashCurrent && hashCurrent < hashReceived) {
-                                nextNode = receivedNodeName;
-                                ipPreviousNode = clientIp;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-
-                            // SMALLEST NODE GETS ADDED, 2 CASES
-                            // we are the smallest, and a smaller gets added
-                            } else if (hashPrevious > hashCurrent && hashReceived < hashCurrent) {
-                                previousNode = receivedNodeName;
-                                ipPreviousNode = clientIp;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "next")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-                            // we are the biggest, and the smallest gets added
-                            } else if (hashNext < hashCurrent && hashReceived < hashNext) {
-                                nextNode = receivedNodeName;
-                                ipPreviousNode = clientIp;
-                                String result = restClient.post()
-                                        .uri("http://" + clientIp + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nodeName, "previous")
-                                        .retrieve()
-                                        .body(String.class);
-                                logger.info(result);
-                            }
-                        }
-                    }
+                if(!received.startsWith("discover")) {
+                    continue;
                 }
+
+                String[] parts = received.split(" ");
+                if(parts.length<=1) {
+                    continue;
+                }
+
+                String receivedNodeName = parts[1];
+                if(receivedNodeName.contains("naming")) {
+                    continue;
+                }
+
+                String clientIp = packet.getAddress().getHostAddress();
+
+                /// hashing of node names
+                int hashReceived = hashingService.hashingFunction(receivedNodeName);
+                int hashCurrent = hashingService.hashingFunction(currentNode);
+                int hashPrevious = hashingService.hashingFunction(previousNode);
+                int hashNext = hashingService.hashingFunction(nextNode);
+
+                /// order logic
+                boolean isOnlyNode = Objects.equals(previousNode, currentNode)
+                        && Objects.equals(nextNode, currentNode)
+                        && !Objects.equals(currentNode, receivedNodeName);
+
+                if (isOnlyNode) {
+                    setPreviousNode(receivedNodeName, clientIp, restClient);
+                    setNextNode(receivedNodeName, clientIp, restClient);
+                } else if (isBetween(hashCurrent, hashReceived, hashNext)) {
+                    setNextNode(receivedNodeName, clientIp, restClient);
+                } else if (isBetween(hashPrevious, hashReceived, hashCurrent)) {
+                    setPreviousNode(receivedNodeName, clientIp, restClient);
+                }
+
                 System.out.println("<<< Received: " + received);
             }
         } catch (Exception e) {
