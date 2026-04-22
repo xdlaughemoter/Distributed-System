@@ -61,6 +61,27 @@ public class MulticastHandler {
             e.printStackTrace();
         }
     }
+    public void removeIpAddress(int hash){
+        ipAddresses.remove(hash);
+        try {
+            // writeValue(File, Object) serializes and saves
+            mapper.writerWithDefaultPrettyPrinter().writeValue(ipFile, ipAddresses);
+            System.out.println("JSON written successfully!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+    }
+    public void removeFileToNodeIP(int hash){
+        fileToNodeIP.remove(hash);
+        try {
+            // writeValue(File, Object) serializes and saves
+            mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
+            System.out.println("JSON written successfully!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     private final Map<Integer, String> ipAddresses = new ConcurrentHashMap<>();
     private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
