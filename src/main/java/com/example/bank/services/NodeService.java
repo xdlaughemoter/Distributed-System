@@ -10,6 +10,7 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,42 +27,15 @@ public class NodeService {
     private String currentNode;
     private String nextNode;
 
-    public String getIpPreviousNode() {
-        return ipPreviousNode;
-    }
-
-    public void setIpPreviousNode(String ipPreviousNode) {
-        this.ipPreviousNode = ipPreviousNode;
-    }
-
-    public String getIpNextNode() {
-        return ipNextNode;
-    }
-
-    public void setIpNextNode(String ipNextNode) {
-        this.ipNextNode = ipNextNode;
-    }
-
     private String ipPreviousNode;
     private String ipNextNode;
     private final HashingService hashingService = new HashingService();
     private int numNodes;
     public static final Logger logger = LoggerFactory.getLogger(NodeService.class);
-
-    public String getNodeName() {
-        return nodeName;
-    }
-
     @Value("${app.nodename}")
     private String nodeName;
 
-    public int getNumNodes() {
-        return numNodes;
-    }
-
-    public void setNumNodes(int numNodes) {
-        this.numNodes = numNodes;
-    }
+    private String namingIp;
 
     // --- SENDING A FILE (POST) ---
     public String uploadFile(String url, MultipartFile file) {
@@ -205,13 +179,25 @@ public class NodeService {
                 if(parts.length<=1) {
                     continue;
                 }
-
+                String clientIp = packet.getAddress().getHostAddress();
                 String receivedNodeName = parts[1];
                 if(receivedNodeName.contains("naming")) {
+                    // add this node to the naming servers IP list
+                    namingIp=clientIp;
+                    try {
+                        String result2 = restClient.post()
+                                .uri("http://" + clientIp + ":8081/naming/{name}/add", nodeName, "next")
+                                .retrieve()
+                                .body(String.class);
+                        logger.info(result2);
+                    } catch (HttpClientErrorException e){
+                        logger.error(e.getMessage());
+                    }
+
                     continue;
                 }
 
-                String clientIp = packet.getAddress().getHostAddress();
+
 
                 /// hashing of node names
                 int hashReceived = hashingService.hashingFunction(receivedNodeName);
@@ -246,5 +232,39 @@ public class NodeService {
 
     public void setNextNode(String name) {
         this.nextNode = name;
+    }
+    public String getNamingIp() {
+        return namingIp;
+    }
+
+    public void setNamingIp(String namingIp) {
+        this.namingIp = namingIp;
+    }
+    public String getIpPreviousNode() {
+        return ipPreviousNode;
+    }
+
+    public void setIpPreviousNode(String ipPreviousNode) {
+        this.ipPreviousNode = ipPreviousNode;
+    }
+
+    public String getIpNextNode() {
+        return ipNextNode;
+    }
+
+    public void setIpNextNode(String ipNextNode) {
+        this.ipNextNode = ipNextNode;
+    }
+
+    public String getNodeName() {
+        return nodeName;
+    }
+
+    public int getNumNodes() {
+        return numNodes;
+    }
+
+    public void setNumNodes(int numNodes) {
+        this.numNodes = numNodes;
     }
 }
