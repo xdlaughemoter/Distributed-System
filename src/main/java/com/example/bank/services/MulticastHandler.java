@@ -153,13 +153,6 @@ public class MulticastHandler {
             e.printStackTrace();
         }
         sendMulticast("discover "+nodeName);
-
-//        RestClient restClient = RestClient.create();
-//        // init of node, change name when making second etc node
-//        String result = restClient.post()
-//                .uri("http://localhost:8081/naming/node1/add")
-//                .retrieve()
-//                .body(String.class);
     }
 
     public void receiveMessages() {
@@ -183,16 +176,16 @@ public class MulticastHandler {
                     // 1. Get the InetAddress object
                     InetAddress senderAddress = packet.getAddress();
 
-// 2. Get the IP as a String
+                    // 2. Get the IP as a String
                     String clientIp = senderAddress.getHostAddress();
-//                    if(ipAddresses.containsValue(clientIp)){
-//                        return ResponseEntity.ok("IP already added");
-//                    }
-//                    Integer hash = hashingService.hashingFunction(receivedNodeName);
-//                    if(ipAddresses.containsKey(hash)){
-//                        return ResponseEntity.status(HttpStatus.CONFLICT)
-//                                .body("Error! Name " + receivedNodeName + " already in use.");
-//                    }
+                    if(ipAddresses.containsValue(clientIp)){
+                        logger.error("already contains ip of node");
+                        continue;
+                    }
+                    if(ipAddresses.containsKey(hashNodeName)){
+                        logger.error("already contains name of node");
+                        continue;
+                    }
                     int numNodes = ipAddresses.size();
                     ipAddresses.put(hashNodeName, clientIp);
                     RestClient restClient = RestClient.create();
@@ -202,13 +195,13 @@ public class MulticastHandler {
                             .retrieve()
                             .body(String.class);
                     logger.info(result);
-//                    sendMulticast("name "+nodeName);
+                    sendMulticast("discover "+nodeName);
 
-
-                } else if(received.startsWith("node")) {
-
-
-                } else if(received.startsWith("name")) {
+//
+//                } else if(received.startsWith("node")) {
+//
+//
+//                } else if(received.startsWith("name")) {
 
                 }
                 System.out.println("<<< Received: " + received);
