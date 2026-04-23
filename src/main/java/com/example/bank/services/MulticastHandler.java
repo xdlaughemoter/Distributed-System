@@ -197,12 +197,6 @@ public class MulticastHandler {
                     logger.info(result);
                     sendMulticast("discover "+nodeName);
 
-//
-//                } else if(received.startsWith("node")) {
-//
-//
-//                } else if(received.startsWith("name")) {
-
                 }
                 System.out.println("<<< Received: " + received);
             }
