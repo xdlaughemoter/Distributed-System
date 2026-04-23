@@ -37,6 +37,19 @@ public class NodeService {
 
     private String namingIp;
 
+    private void failureNotifyNamingServ(String nodeName){
+        RestClient restClient = RestClient.create();
+        try{
+            String result = restClient.post()
+                    .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
+                    .retrieve()
+                    .body(String.class);
+            logger.info(result);
+        } catch (HttpClientErrorException e){
+            logger.error(e.getMessage());
+        }
+    }
+
     // --- SENDING A FILE (POST) ---
     public String uploadFile(String url, MultipartFile file) {
         RestClient restClient = RestClient.create();
@@ -51,6 +64,7 @@ public class NodeService {
                 .body(body)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (req, res) -> {
+                    //failureNotifyNamingServ(); dont know the name. if server doesnt respond cant get the name anyhow
                     throw new RuntimeException("Node returned error: " + res.getStatusCode());
                 })
                 .body(String.class);
@@ -98,16 +112,29 @@ public class NodeService {
         if(!currentNode.equals(previousNode) && !currentNode.equals(nextNode)){
             return;
         }
-        String result = restClient.post()
-                .uri("http://localhost:8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipPreviousNode)
-                .retrieve()
-                .body(String.class);
-        logger.info(result);
-        String result2 = restClient.post()
-                .uri("http://localhost:8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nodeName, "next", ipNextNode)
-                .retrieve()
-                .body(String.class);
-        logger.info(result2);
+        try{
+            String result = restClient.post()
+                    .uri("http://"+ipNextNode+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipPreviousNode)
+                    .retrieve()
+                    .body(String.class);
+            logger.info(result);
+        } catch (HttpClientErrorException e){
+            failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
+            failureNotifyNamingServ(previousNode);
+            logger.error(e.getMessage());
+            return;
+        }
+        try{
+            String result2 = restClient.post()
+                    .uri("http://"+ipPreviousNode+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "next", ipNextNode)
+                    .retrieve()
+                    .body(String.class);
+            logger.info(result2);
+        } catch (HttpClientErrorException e){
+            failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
+            failureNotifyNamingServ(nextNode);
+            logger.error(e.getMessage());
+        }
 
     }
 
@@ -139,13 +166,23 @@ public class NodeService {
     private void setPreviousNode(String nodeName, String ip, RestClient restClient) {
         previousNode = nodeName;
         ipPreviousNode = ip;
-        sendChangeNext(restClient, ip);
+        try {
+            sendChangeNext(restClient, ip);
+        } catch (HttpClientErrorException e){
+            failureNotifyNamingServ(nodeName);
+            logger.error(e.getMessage());
+        }
     }
 
     private void setNextNode(String nodeName, String ip, RestClient restClient) {
         nextNode = nodeName;
         ipNextNode = ip;
-        sendChangePrevious(restClient, ip);
+        try{
+            sendChangePrevious(restClient, ip);
+        } catch (HttpClientErrorException e){
+            failureNotifyNamingServ(nodeName);
+            logger.error(e.getMessage());
+        }
     }
 
     private boolean isBetween(int start, int value, int end) {

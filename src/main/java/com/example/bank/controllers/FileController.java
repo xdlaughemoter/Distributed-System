@@ -42,7 +42,7 @@ public class FileController {
         RestClient restClient = RestClient.create();
 
         String result = restClient.get()
-                .uri("http://localhost:8081/naming/{filename}/file-store", filename)
+                .uri("http://"+nodeService.getNamingIp()+":8081/naming/{filename}/file-store", filename)
                 .retrieve()
                 .body(String.class);
         logger.info(result);
