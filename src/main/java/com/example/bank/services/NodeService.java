@@ -7,26 +7,24 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.*;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.multipart.MultipartFile;
 
+import java.io.*;
 import java.net.*;
-import java.util.Enumeration;
-import java.util.Objects;
+import java.util.*;
 
 @Service
 public class NodeService {
-
     private final String GROUP_ADDRESS = "230.0.0.0";
     private final int PORT = 4446;
     private String previousNode;
     private String currentNode;
     private String nextNode;
-
     private String ipPreviousNode;
     private String ipNextNode;
     private final HashingService hashingService = new HashingService();
@@ -34,11 +32,12 @@ public class NodeService {
     public static final Logger logger = LoggerFactory.getLogger(NodeService.class);
     @Value("${app.nodename}")
     private String nodeName;
-
     private String namingIp;
+    private final String fileDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
 
     private void failureNotifyNamingServ(String nodeName){
         RestClient restClient = RestClient.create();
+        logger.info("Failure notification to naming server");
         try{
             String result = restClient.post()
                     .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
@@ -51,13 +50,13 @@ public class NodeService {
     }
 
     // --- SENDING A FILE (POST) ---
-    public String uploadFile(String url, MultipartFile file) {
+    public String uploadFile(String url, File file) {
         RestClient restClient = RestClient.create();
 
         // We use a MultiValueMap to wrap the file resource
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", file.getResource());
-
+        body.add("file", file);
+        logger.info("File uploaded to "+ url);
         return restClient.post()
                 .uri("http://{ip}:8080/node/receive", url) // Assuming port 8080
                 .contentType(MediaType.MULTIPART_FORM_DATA)
@@ -76,7 +75,7 @@ public class NodeService {
             byte[] buf = message.getBytes();
             DatagramPacket packet = new DatagramPacket(buf, buf.length, group, PORT);
             socket.send(packet);
-            System.out.println(">>> Sent: " + message);
+            logger.info(">>> Multicast Sent: " + message);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -84,6 +83,7 @@ public class NodeService {
 
     public void discoverNodes(){
         try {
+            logger.info("Discover node message");
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 NetworkInterface iface = interfaces.nextElement();
@@ -96,7 +96,7 @@ public class NodeService {
                     // Check for IPv4 address
                     if (addr.getHostAddress().contains(":")) continue;
 
-                    System.out.println(iface.getDisplayName() + " IP: " + addr.getHostAddress());
+                    logger.info(iface.getDisplayName() + " IP: " + addr.getHostAddress());
                 }
             }
         } catch (Exception e) {
@@ -108,11 +108,78 @@ public class NodeService {
 
     @PreDestroy
     public void onDestroy(){
+        logger.info("On Destroy triggered");
+        File folder = new File(fileDirectory);
+
+        // Get all files and folders in the directory
+        File[] files = folder.listFiles();
+
         RestClient restClient = RestClient.create();
+        List<String> fileNamesPrev= new ArrayList<>();
+        try{
+            logger.info("Get list of files on previous node");
+            String result = restClient.get()
+                    .uri("http://" + ipPreviousNode + ":8080/node/file-list")
+                    .retrieve()
+                    .body(String.class);
+            logger.info(result);
+            assert result != null;
+            fileNamesPrev = Arrays.stream(result.split(" ")).toList();
+            if(fileNamesPrev.size()<=1) {
+                return;
+            }
+        } catch (HttpClientErrorException e){
+            logger.warn(e.getMessage());
+        }
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile()) {
+                    logger.info("Check file "+file.getName());
+                    if(!fileNamesPrev.stream().anyMatch(name -> name.equals(file.getName()))){
+                        // if im not the onwer, dont send it to previous
+                        logger.info("File does not exist on previous node");
+                        try {
+                            logger.info("Check who is the onwer of the file");
+                            String result = restClient.get()
+                                    .uri("http://" + getNamingIp() + ":8081/naming/{filename}/file-search", file.getName())
+                                    .retrieve()
+                                    .body(String.class);
+                            logger.info(result);
+                            if(result.equals(InetAddress.getLocalHost().getHostAddress())){
+                                logger.info("We are not the owner, so notify the owner and continue");
+                                String result2 = restClient.post()
+                                        .uri("http://"+result+":8080/node/notifyDeletion/{fileName}", file.getName())
+                                        .retrieve()
+                                        .body(String.class);
+                                logger.info(result2);
+                                continue;
+                            }
+                        }catch (HttpClientErrorException e){
+                            logger.error(e.getMessage());
+                        } catch (UnknownHostException e) {
+                            throw new RuntimeException(e);
+                        }
+                        logger.info("We are the owner, so send to previous node and make him owner");
+                        sendFileToPreviousNode(file);
+                    }
+                }
+            }
+        } else {
+            System.err.println("The path is not a directory or an I/O error occurred.");
+        }
+        logger.info("Remove node from naming server");
+        String result3 = restClient.delete()
+                .uri("http://"+getNamingIp()+":8081/naming/{nodeName}/remove-node", nodeName)
+                .retrieve()
+                .body(String.class);
+        logger.info(result3);
+
         if(!currentNode.equals(previousNode) && !currentNode.equals(nextNode)){
             return;
         }
         try{
+            logger.info("Destroy neighbour mapping");
             String result = restClient.post()
                     .uri("http://"+ipNextNode+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipPreviousNode)
                     .retrieve()
@@ -141,11 +208,109 @@ public class NodeService {
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         // 1. Start the listener in a BACKGROUND thread so it doesn't block Spring
+        logger.info("Application ready");
         new Thread(this::receiveMessages).start();
+        new Thread(this::receiveFiles).start();
 
         // 2. Now run your discovery logic
         discoverNodes();
+        distributeFiles();
     }
+
+    @Scheduled(fixedDelay = 5000) // every 5 seconds
+    private void distributeFiles(){
+        logger.info("Distribute file check");
+        File folder = new File(fileDirectory);
+
+        // Get all files and folders in the directory
+        File[] files = folder.listFiles();
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile()) {
+                    replicateFile(file);
+                }
+            }
+        } else {
+            System.err.println("The path is not a directory or an I/O error occurred.");
+        }
+    }
+
+    public void sendFileToPreviousNode(File file){
+        logger.info("Send file to previous node through TCP");
+        try (Socket socket = new Socket(ipPreviousNode, 9000);
+             FileInputStream fis = new FileInputStream(file);
+             DataOutputStream dos = new DataOutputStream(socket.getOutputStream())) {
+
+            // 1. Send metadata (Filename and Size)
+            dos.writeUTF(file.getName());
+            dos.writeLong(file.length());
+
+            // 2. Stream file bytes
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                dos.write(buffer, 0, bytesRead);
+            }
+            dos.flush();
+            logger.info("File "+file.getName()+" sent successfully.");
+        } catch (UnknownHostException e) {
+            throw new RuntimeException(e);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void receiveFiles() {
+        try {
+            ServerSocket serverSocket = new ServerSocket(9000);
+            logger.info("TCP Server listening on port 9000 for file transfers...");
+
+            try (Socket socket = serverSocket.accept();
+                 DataInputStream dis = new DataInputStream(socket.getInputStream())) {
+
+                // 1. Read metadata
+                String fileName = dis.readUTF();
+                long fileSize = dis.readLong();
+
+                try (FileOutputStream fos = new FileOutputStream("received_" + fileName)) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    long totalRead = 0;
+
+                    // 2. Read file content based on size
+                    while (totalRead < fileSize && (bytesRead = dis.read(buffer)) != -1) {
+                        fos.write(buffer, 0, bytesRead);
+                        totalRead += bytesRead;
+                    }
+                    logger.info("File " + fileName + " received successfully.");
+                }
+                } catch (IOException e) {
+                    logger.error(e.getMessage());
+                }
+            } catch (IOException e){
+                logger.error(e.getMessage());
+
+            }
+        }
+
+    public void replicateFile(File file){
+            String filename = file.getName();
+            RestClient restClient = RestClient.create();
+            try{
+                logger.info("Replication begin");
+                String result = restClient.get()
+                    .uri("http://"+getNamingIp()+":8081/naming/{filename}/file-store", filename)
+                    .retrieve()
+                    .body(String.class);
+                logger.info("File replicated to "+result);
+                uploadFile(result, file);
+            } catch (HttpClientErrorException e){
+                logger.warn(e.getMessage());
+            }
+        }
 
     private void sendChangePrevious(RestClient restClient, String clientIp){
         String result = restClient.post()
@@ -193,12 +358,13 @@ public class NodeService {
     }
 
     public void receiveMessages() {
+        logger.info("Open socket to receive multicasts");
         try (MulticastSocket socket = new MulticastSocket(PORT)) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
             // On modern Java/VMs, it's safer to specify the interface
             socket.joinGroup(group);
 
-            System.out.println("Listening for multicast on " + GROUP_ADDRESS + ":" + PORT);
+            logger.info("Listening for multicast on " + GROUP_ADDRESS + ":" + PORT);
             RestClient restClient = RestClient.create();
             byte[] buf = new byte[256];
 
@@ -208,7 +374,9 @@ public class NodeService {
                 socket.receive(packet);
 
                 String received = new String(packet.getData(), 0, packet.getLength());
+                logger.info("Multicast packet received: "+ received);
                 if(!received.startsWith("discover")) {
+                    logger.info("Multicast packet didnt start with discover");
                     continue;
                 }
 
@@ -219,9 +387,12 @@ public class NodeService {
                 String clientIp = packet.getAddress().getHostAddress();
                 String receivedNodeName = parts[1];
                 if(receivedNodeName.contains("naming")) {
+                    logger.info("Naming server discovered");
                     // add this node to the naming servers IP list
                     namingIp=clientIp;
+                    logger.info("Naming server IP set to: "+ clientIp);
                     try {
+                        logger.info("Add current node to naming server");
                         String result2 = restClient.post()
                                 .uri("http://" + clientIp + ":8081/naming/{name}/add", nodeName, "next")
                                 .retrieve()
@@ -233,9 +404,7 @@ public class NodeService {
 
                     continue;
                 }
-
-
-
+                logger.info("Node discover received");
                 /// hashing of node names
                 int hashReceived = hashingService.hashingFunction(receivedNodeName);
                 int hashCurrent = hashingService.hashingFunction(currentNode);
@@ -248,15 +417,20 @@ public class NodeService {
                         && !Objects.equals(currentNode, receivedNodeName);
 
                 if (isOnlyNode) {
+                    logger.info("Second node, set next and previous node to "+receivedNodeName);
                     setPreviousNode(receivedNodeName, clientIp, restClient);
                     setNextNode(receivedNodeName, clientIp, restClient);
                 } else if (isBetween(hashCurrent, hashReceived, hashNext)) {
+                    logger.info("Set next node to "+receivedNodeName);
                     setNextNode(receivedNodeName, clientIp, restClient);
                 } else if (isBetween(hashPrevious, hashReceived, hashCurrent)) {
+                    logger.info("Set previous node to "+receivedNodeName);
                     setPreviousNode(receivedNodeName, clientIp, restClient);
+                } else{
+                    logger.info("Neither next or previous node");
                 }
 
-                System.out.println("<<< Received: " + received);
+
             }
         } catch (Exception e) {
             e.printStackTrace();
