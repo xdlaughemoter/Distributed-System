@@ -36,6 +36,7 @@ public class MulticastHandler {
         return fileToNodeIP;
     }
     public void insertIpAddress(int hash, String ipAddr){
+        logger.info("Insert IP adress "+ ipAddresses);
         ipAddresses.put(hash, ipAddr);
         try {
             // writeValue(File, Object) serializes and saves
@@ -46,7 +47,11 @@ public class MulticastHandler {
         }
 
     }
-    public void insertFileToNodeIP(int hash, String ipAddr){
+    public boolean insertFileToNodeIP(int hash, String ipAddr){
+        if (fileToNodeIP.containsKey(hash)){
+            return false;
+        }
+        logger.info("File added with owner "+ ipAddr);
         fileToNodeIP.put(hash, ipAddr);
         try {
             // writeValue(File, Object) serializes and saves
@@ -55,8 +60,10 @@ public class MulticastHandler {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return true;
     }
     public void removeIpAddress(int hash){
+        logger.info("Remove ip adress of hash "+ hash);
         ipAddresses.remove(hash);
         try {
             // writeValue(File, Object) serializes and saves
@@ -66,6 +73,51 @@ public class MulticastHandler {
             e.printStackTrace();
         }
 
+    }
+
+    public int getPreviousHashofNodeHash(int hashNode){
+        int lowerHash=0;
+        for (Integer i : ipAddresses.keySet()) {
+            if(lowerHash<i && i<hashNode){
+                lowerHash=i;
+            }
+        }
+        if(lowerHash == 0){
+            lowerHash = ipAddresses.keySet().stream()
+                    .max(Integer::compare)
+                    .orElse(0);
+        }
+        return lowerHash;
+    }
+    public int getNextHashofNodeHash(int hashNode){
+        int higherHash=Integer.MAX_VALUE;
+        for (Integer i : ipAddresses.keySet()) {
+            if(hashNode<i && i<higherHash){
+                higherHash=i;
+            }
+        }
+        if(higherHash == Integer.MAX_VALUE){
+            higherHash =  ipAddresses.keySet().stream()
+                    .min(Integer::compare)
+                    .orElse(0);
+        }
+        return higherHash;
+    }
+    public void removeIPFromFileToNode(int hash){
+        logger.info("Change ownership of files of current node to previous node");
+        int previousHash = getPreviousHashofNodeHash(hash);
+        String ipPrevious = ipAddresses.get(previousHash);
+        String ipCurrent = ipAddresses.get(hash);
+        logger.info("IP previous node "+ ipPrevious);
+        logger.info("IP current node "+ ipCurrent);
+        fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent) ? ipPrevious : value);
+        try {
+            // writeValue(File, Object) serializes and saves
+            mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
+            System.out.println("JSON written successfully!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
     public void removeFileToNodeIP(int hash){
         fileToNodeIP.remove(hash);
@@ -87,7 +139,7 @@ public class MulticastHandler {
 
     public MulticastHandler() {
             mapper = new ObjectMapper();
-
+            logger.info("Reading json on init...");
             // Load IP Addresses
             if (ipFile.exists()) {
                 try {
@@ -112,6 +164,7 @@ public class MulticastHandler {
     }
 
     public void sendMulticast(String message) {
+        logger.info("Send multicast with message: "+ message);
         try (MulticastSocket socket = new MulticastSocket()) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
             byte[] buf = message.getBytes();
@@ -126,6 +179,7 @@ public class MulticastHandler {
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         // 1. Start the listener in a BACKGROUND thread so it doesn't block Spring
+        logger.info("Application ready");
         new Thread(this::receiveMessages).start();
 
         // 2. Now run your discovery logic
@@ -134,6 +188,7 @@ public class MulticastHandler {
 
     public void discoverNodes(){
         try {
+            logger.info("Discover nodes");
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 NetworkInterface iface = interfaces.nextElement();
@@ -156,25 +211,31 @@ public class MulticastHandler {
     }
 
     public void receiveMessages() {
+        logger.info("Open socket to receive multicasts");
         try (MulticastSocket socket = new MulticastSocket(PORT)) {
             InetAddress group = InetAddress.getByName(GROUP_ADDRESS);
 
             // On modern Java/VMs, it's safer to specify the interface
             socket.joinGroup(group);
 
-            System.out.println("Listening for multicast on " + GROUP_ADDRESS + ":" + PORT);
+            logger.info("Listening for multicast on " + GROUP_ADDRESS + ":" + PORT);
 
             byte[] buf = new byte[256];
             while (true) {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 socket.receive(packet);
                 String received = new String(packet.getData(), 0, packet.getLength());
+                logger.info("Multicast packet received: "+ received);
                 if(received.startsWith("discover")){
                     String[] parts = received.split(" ");
                     String receivedNodeName = parts[1];
                     int hashNodeName = hashingService.hashingFunction(receivedNodeName);
                     // 1. Get the InetAddress object
                     InetAddress senderAddress = packet.getAddress();
+                    if(receivedNodeName.contains("naming")) {
+                        continue;
+                    }
+                    sendMulticast("discover " + nodeName);
 
                     // 2. Get the IP as a String
                     String clientIp = senderAddress.getHostAddress();
@@ -195,10 +256,8 @@ public class MulticastHandler {
                             .retrieve()
                             .body(String.class);
                     logger.info(result);
-                    sendMulticast("discover "+nodeName);
 
                 }
-                System.out.println("<<< Received: " + received);
             }
         } catch (Exception e) {
             e.printStackTrace();

@@ -25,8 +25,9 @@ public class NamingController {
     public static final Logger logger = LoggerFactory.getLogger(NamingController.class);
 
 
-    @GetMapping("/{fileName}/node-destroy")
+    @GetMapping("/{fileName}/file-store")
     public ResponseEntity<String> determineNodeToStore(@PathVariable String fileName) {
+        logger.info("Request to determine node to store file of name: "+fileName);
         int hashFile = hashingService.hashingFunction(fileName);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
         if(ipAddresses.isEmpty()){
@@ -38,27 +39,42 @@ public class NamingController {
             if (hashFile - i < Math.abs(smallestHashDifference - i)) { // absolute value bcus init can be negative
                 smallestHashDifference = hashFile;
             }
-
         }
+        logger.info("Node found with smallest hash diff: "+smallestHashDifference);
 
-        multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference));
-        return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
+        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference))){
+            logger.info("Not a duplicate, file inserted");
+            return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
+        }
+        return ResponseEntity.badRequest().body("File was already replicated, hash is duplicate");
     }
 
 
-    @GetMapping("/{file}/fileSearch")
+    @GetMapping("/{file}/file-search")
     public ResponseEntity<String> getNodeWhichHasFile(@PathVariable String file) {
+        logger.info("Search which node has file: "+file);
         int hash = hashingService.hashingFunction(file);
         Map<Integer, String> fileToNodeIP = multicastHandler.getFileToNodeIP();
         if(!fileToNodeIP.containsKey(hash)){
             return ResponseEntity.notFound().build();
         }
         String ip = fileToNodeIP.get(hashingService.hashingFunction(file));
+        logger.info("Node "+ip+" has the file");
 
         return ResponseEntity.ok(ip);
     }
+
+    @DeleteMapping("/{name}/remove-node")
+    public ResponseEntity<String> removeNode(@PathVariable String name) {
+        logger.info("Remove node "+ name);
+        int hash = hashingService.hashingFunction(name);
+        multicastHandler.removeIPFromFileToNode(hash);
+        multicastHandler.removeIpAddress(hash);
+        return ResponseEntity.ok().build();
+    }
     @GetMapping("/{name}/get")
     public ResponseEntity<String> getIPByNode(@PathVariable String name) {
+        logger.info("get IP of node "+ name);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
         String resultIP = ipAddresses.getOrDefault(hashingService.hashingFunction(name), "error");
         return ResponseEntity.ok(resultIP);
@@ -66,6 +82,7 @@ public class NamingController {
 
     @PostMapping("/{name}/add")
     public ResponseEntity<String> addIP(@PathVariable String name, HttpServletRequest request) {
+        logger.info("Add node "+ name);
         String clientIp = request.getRemoteAddr();
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
         if(ipAddresses.containsValue(clientIp)){
@@ -84,41 +101,28 @@ public class NamingController {
 
     @PostMapping("/{name}/failure")
     public ResponseEntity<String> failureNodeDelete(@PathVariable String name) {
+        logger.info("Failure in node "+ name);
         int hashFailed = hashingService.hashingFunction(name);
-        int higherHash = Integer.MAX_VALUE;
-        int lowerHash = 0;
+        int nextHash = multicastHandler.getNextHashofNodeHash(hashFailed);
+        int previousHash = multicastHandler.getPreviousHashofNodeHash(hashFailed);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
         RestClient restClient = RestClient.create();
-        for (Integer i : ipAddresses.keySet()) {
-            if(lowerHash<i && i<hashFailed){
-                lowerHash=i;
-            } else if(hashFailed<i && i<higherHash){
-                higherHash=i;
-            }
-        }
-        if(lowerHash == 0){
-            lowerHash = ipAddresses.keySet().stream()
-                    .max(Integer::compare)
-                    .orElse(0);
-        }
-        if(higherHash == Integer.MAX_VALUE){
-            higherHash =  ipAddresses.keySet().stream()
-                    .min(Integer::compare)
-                    .orElse(0);
-        }
-        String ipPrevNode = ipAddresses.get(lowerHash);
+
+        String ipPrevNode = ipAddresses.get(previousHash);
+        logger.info("IP previous node "+ ipPrevNode);
         String namePreviousNode = restClient.get()
                 .uri("http://"+ipPrevNode+":8080/node/nodename")
                 .retrieve()
                 .body(String.class);
         logger.info(namePreviousNode);
-        String ipNextNode = ipAddresses.get(higherHash);
+        String ipNextNode = ipAddresses.get(nextHash);
+        logger.info("IP next node "+ ipNextNode);
         String nameNextNode = restClient.get()
                 .uri("http://"+ipNextNode+":8080/node/nodename")
                 .retrieve()
                 .body(String.class);
         logger.info(nameNextNode);
-
+        logger.info("Neighbour mapping ");
         String result = restClient.post()
                 .uri("http://" + ipPrevNode + ":8080/node/neighbour-mapping/{nodeName}/{typeNeighbour}", nameNextNode, "next")
                 .retrieve()
@@ -129,7 +133,8 @@ public class NamingController {
                 .retrieve()
                 .body(String.class);
         logger.info(result2);
-        multicastHandler.removeFileToNodeIP(hashFailed);
+        logger.info("Remove node from hashmappings ");
+        multicastHandler.removeIPFromFileToNode(hashFailed);
         multicastHandler.removeIpAddress(hashFailed);
 
         return ResponseEntity.ok("Success! Node deleted ");
