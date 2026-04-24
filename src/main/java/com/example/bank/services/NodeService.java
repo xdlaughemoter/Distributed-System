@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.*;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
@@ -19,6 +20,7 @@ import java.net.*;
 import java.util.*;
 
 @Service
+@EnableScheduling
 public class NodeService {
     private final String GROUP_ADDRESS = "230.0.0.0";
     private final int PORT = 4446;
@@ -110,6 +112,10 @@ public class NodeService {
     public void onDestroy(){
         logger.info("On Destroy triggered");
         File folder = new File(fileDirectory);
+        if (!folder.exists()) {
+            folder.mkdirs();
+        }
+
 
         // Get all files and folders in the directory
         File[] files = folder.listFiles();
@@ -221,6 +227,9 @@ public class NodeService {
     private void distributeFiles(){
         logger.info("Distribute file check");
         File folder = new File(fileDirectory);
+        if (!folder.exists()) {
+            folder.mkdirs();
+        }
 
         // Get all files and folders in the directory
         File[] files = folder.listFiles();
@@ -301,6 +310,9 @@ public class NodeService {
             RestClient restClient = RestClient.create();
             try{
                 logger.info("Replication begin");
+                if(namingIp == null){
+                    return;
+                }
                 String result = restClient.get()
                     .uri("http://"+getNamingIp()+":8081/naming/{filename}/file-store", filename)
                     .retrieve()
