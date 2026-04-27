@@ -13,7 +13,6 @@ import org.springframework.web.client.RestClient;
 
 import java.util.Collections;
 import java.util.Map;
-import java.util.Objects;
 
 
 @RestController
@@ -21,15 +20,23 @@ import java.util.Objects;
 @EnableAsync
 public class NamingController {
     private final HashingService hashingService = new HashingService();
-    private final MulticastHandler multicastHandler = new MulticastHandler();
+    private final MulticastHandler multicastHandler;
     public static final Logger logger = LoggerFactory.getLogger(NamingController.class);
 
+    private final RestClient restClient; // Define it here
+
+    // Spring will automatically provide the 'restClient' bean we defined in ClientConfig
+    public NamingController(MulticastHandler multicastHandler, RestClient restClient) {
+        this.multicastHandler = multicastHandler;
+        this.restClient = restClient;
+    }
 
     @GetMapping("/{fileName}/file-store")
     public ResponseEntity<String> determineNodeToStore(@PathVariable String fileName) {
         logger.info("Request to determine node to store file of name: "+fileName);
         int hashFile = hashingService.hashingFunction(fileName);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
+        logger.info(ipAddresses.toString());
         if(ipAddresses.isEmpty()){
             return ResponseEntity.badRequest().body("no ip adresses on naming server");
         }
@@ -37,7 +44,8 @@ public class NamingController {
         for (Integer i : ipAddresses.keySet()) {
             if(i>hashFile) continue;
             if (hashFile - i < Math.abs(smallestHashDifference - i)) { // absolute value bcus init can be negative
-                smallestHashDifference = hashFile;
+                logger.info(smallestHashDifference+" is current smalles has diff");
+                smallestHashDifference = i;
             }
         }
         logger.info("Node found with smallest hash diff: "+smallestHashDifference);
@@ -66,11 +74,11 @@ public class NamingController {
 
     @DeleteMapping("/{name}/remove-node")
     public ResponseEntity<String> removeNode(@PathVariable String name) {
-        logger.info("Remove node "+ name);
+        logger.info("/////////////////////////////////////////////////////////////////////////////////Remove node "+ name);
         int hash = hashingService.hashingFunction(name);
         multicastHandler.removeIPFromFileToNode(hash);
         multicastHandler.removeIpAddress(hash);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok().body("balbalbabla");
     }
     @GetMapping("/{name}/get")
     public ResponseEntity<String> getIPByNode(@PathVariable String name) {
@@ -106,7 +114,6 @@ public class NamingController {
         int nextHash = multicastHandler.getNextHashofNodeHash(hashFailed);
         int previousHash = multicastHandler.getPreviousHashofNodeHash(hashFailed);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
-        RestClient restClient = RestClient.create();
 
         String ipPrevNode = ipAddresses.get(previousHash);
         logger.info("IP previous node "+ ipPrevNode);

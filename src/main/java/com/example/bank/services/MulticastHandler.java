@@ -4,11 +4,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.io.File;
@@ -18,7 +20,7 @@ import java.util.Enumeration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Component
+@Service
 @EnableAsync
 public class MulticastHandler {
 
@@ -27,6 +29,35 @@ public class MulticastHandler {
     private final String GROUP_ADDRESS = "230.0.0.0";
     private final int PORT = 4446;
     private final HashingService hashingService = new HashingService();
+    private final RestClient restClient; // Define it here
+    public MulticastHandler(RestClient restClient) {
+        this.restClient = restClient;
+        mapper = new ObjectMapper();
+        logger.info("Reading json on init...");
+        // Load IP Addresses
+        if (ipFile.exists()) {
+            try {
+                Map<Integer, String> loadedIps = mapper.readValue(ipFile, new TypeReference<Map<Integer, String>>() {});
+                this.ipAddresses.putAll(loadedIps);
+                System.out.println("Loaded IP addresses from file.");
+            } catch (IOException e) {
+                System.err.println("Could not parse ipAddresses.json: " + e.getMessage());
+            }
+        }
+
+        if (nodeFile.exists()) {
+            try {
+                Map<Integer, String> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, String>>() {});
+                this.fileToNodeIP.putAll(loadedNodes);
+                System.out.println("Loaded node mappings from file.");
+            } catch (IOException e) {
+                System.err.println("Could not parse nodeToFile.json: " + e.getMessage());
+            }
+        }
+
+    }
+
+
 
     public Map<Integer, String> getIpAddresses() {
         return ipAddresses;
@@ -137,31 +168,6 @@ public class MulticastHandler {
     private ObjectMapper mapper;
     public static final Logger logger = LoggerFactory.getLogger(MulticastHandler.class);
 
-    public MulticastHandler() {
-            mapper = new ObjectMapper();
-            logger.info("Reading json on init...");
-            // Load IP Addresses
-            if (ipFile.exists()) {
-                try {
-                    Map<Integer, String> loadedIps = mapper.readValue(ipFile, new TypeReference<Map<Integer, String>>() {});
-                    this.ipAddresses.putAll(loadedIps);
-                    System.out.println("Loaded IP addresses from file.");
-                } catch (IOException e) {
-                    System.err.println("Could not parse ipAddresses.json: " + e.getMessage());
-                }
-            }
-
-            if (nodeFile.exists()) {
-                try {
-                    Map<Integer, String> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, String>>() {});
-                    this.fileToNodeIP.putAll(loadedNodes);
-                    System.out.println("Loaded node mappings from file.");
-                } catch (IOException e) {
-                    System.err.println("Could not parse nodeToFile.json: " + e.getMessage());
-                }
-            }
-
-    }
 
     public void sendMulticast(String message) {
         logger.info("Send multicast with message: "+ message);
@@ -248,8 +254,7 @@ public class MulticastHandler {
                         continue;
                     }
                     int numNodes = ipAddresses.size();
-                    ipAddresses.put(hashNodeName, clientIp);
-                    RestClient restClient = RestClient.create();
+                    insertIpAddress(hashNodeName, clientIp);
 
                     String result = restClient.post()
                             .uri("http://"+clientIp+":8080/node/discover-response/{numNodes}", numNodes)
