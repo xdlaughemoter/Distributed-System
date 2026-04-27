@@ -12,8 +12,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
@@ -125,7 +123,7 @@ public class FileController {
                 .filter(File::isFile)               // Optional: filter out directories
                 .map(File::getName)                 // Get just the name string
                 .collect(Collectors.joining(" "));
-        logger.info("Returend filename list "+fileNames);
+        logger.info("Returned filename list "+fileNames);
         return ResponseEntity.ok(fileNames);
     }
 
