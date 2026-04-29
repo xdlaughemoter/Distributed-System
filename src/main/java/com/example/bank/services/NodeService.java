@@ -96,6 +96,7 @@ public class NodeService {
     public void discoverNodes(){
         try {
             logger.info("Discover node message");
+            // find own IP adress
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 NetworkInterface iface = interfaces.nextElement();
@@ -114,26 +115,20 @@ public class NodeService {
         } catch (Exception e) {
             e.printStackTrace();
         }
+        // init situation (we assume we are the only node
         this.currentNode = this.nextNode = this.previousNode = nodeName;
+        // send out multicast to discover different servers
         sendMulticast("discover "+nodeName);
     }
 
     @PreDestroy
     public void onDestroy(){
         logger.info("On Destroy triggered");
-        logger.info("Remove node from naming server");
-        String result3 = restClient.delete()
-                .uri("http://"+getNamingIp()+":8081/naming/{nodeName}/remove-node", nodeName)
-                .retrieve()
-                .body(String.class);
-        logger.info("Restclient response"+result3);
 
         File folder = new File(fileDirectory);
         if (!folder.exists()) {
             folder.mkdirs();
         }
-
-
         // Get all files and folders in the directory
         File[] files = folder.listFiles();
 
@@ -150,6 +145,7 @@ public class NodeService {
                     fileNamesPrev = Arrays.stream(result.split(" ")).toList();
                 }
             } catch (HttpClientErrorException e) {
+                failureNotifyNamingServ(previousNode);
                 logger.warn(e.getMessage());
             }
         }
@@ -191,6 +187,13 @@ public class NodeService {
         } else {
             System.err.println("The path is not a directory or an I/O error occurred.");
         }
+
+        logger.info("Remove node from naming server");
+        String result3 = restClient.delete()
+                .uri("http://"+getNamingIp()+":8081/naming/{nodeName}/remove-node", nodeName)
+                .retrieve()
+                .body(String.class);
+        logger.info("Restclient response"+result3);
 
         if(currentNode.equals(previousNode) && currentNode.equals(nextNode)){
             return;
@@ -400,17 +403,22 @@ public class NodeService {
 
                 String received = new String(packet.getData(), 0, packet.getLength());
                 logger.info("Multicast packet received: "+ received);
+                // check for correct package start
                 if(!received.startsWith("discover")) {
                     logger.info("Multicast packet didnt start with discover");
                     continue;
                 }
 
+                // check if a name was passed on
                 String[] parts = received.split(" ");
                 if(parts.length<=1) {
                     continue;
                 }
+                // get ip adress of sender
                 String clientIp = packet.getAddress().getHostAddress();
+                // get name of sender
                 String receivedNodeName = parts[1];
+                // if it is naming server
                 if(receivedNodeName.contains("naming")) {
                     logger.info("Naming server discovered");
                     // add this node to the naming servers IP list
