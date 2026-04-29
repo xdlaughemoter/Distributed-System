@@ -73,8 +73,9 @@ public class NamingController {
     }
 
     @DeleteMapping("/{name}/remove-node")
-    public ResponseEntity<String> removeNode(@PathVariable String name) {
-        logger.info("/////////////////////////////////////////////////////////////////////////////////Remove node "+ name);
+    public ResponseEntity<String> removeNode(@PathVariable String name, HttpServletRequest request) {
+        logger.info("Remove node "+ name);
+        String ipadd = request.getRemoteAddr();
         int hash = hashingService.hashingFunction(name);
         multicastHandler.removeIPFromFileToNode(hash);
         multicastHandler.removeIpAddress(hash);

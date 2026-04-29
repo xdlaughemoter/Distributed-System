@@ -141,7 +141,11 @@ public class MulticastHandler {
         String ipCurrent = ipAddresses.get(hash);
         logger.info("IP previous node "+ ipPrevious);
         logger.info("IP current node "+ ipCurrent);
-        fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent) ? ipPrevious : value);
+        if(ipPrevious.equals(ipCurrent)){
+            fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent));
+        } else{
+            fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent) ? ipPrevious : value);
+        }
         try {
             // writeValue(File, Object) serializes and saves
             mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
