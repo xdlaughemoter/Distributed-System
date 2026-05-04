@@ -1,5 +1,6 @@
 package com.example.bank.controllers;
 
+import com.example.bank.agents.SyncAgent;
 import com.example.bank.services.NodeService;
 import com.example.bank.services.HashingService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,6 +44,31 @@ public class FileController {
         logger.info("File "+fileName+" has been deleted on another node");
         return ResponseEntity.ok().build();
     }
+
+    @PostMapping("/syncAgent")
+    public ResponseEntity<String> syncAgent(@RequestBody SyncAgent syncAgentReceived) {
+        logger.info("Sync agent received");
+        SyncAgent localSyncAgent =  nodeService.getSyncAgent();
+        if(!localSyncAgent.fileList.equals(syncAgentReceived.fileList)){
+            logger.info("Sync agent lists not equal");
+            localSyncAgent.fileList.putAll(syncAgentReceived.fileList);
+            nodeService.sendSyncToNextNode();
+        }
+        return ResponseEntity.ok().build();
+    }
+    // test api point
+    @PostMapping("/lock")
+    public ResponseEntity<String> syncAgent() {
+        logger.info("Sync agent received");
+        SyncAgent localSyncAgent =  nodeService.getSyncAgent();
+        // get the first file and then set it to the opposite
+        String blabal = localSyncAgent.fileList.keySet().stream().iterator().next();
+        logger.info(blabal);
+        localSyncAgent.fileList.put(blabal,
+                !localSyncAgent.fileList.get(blabal));
+        return ResponseEntity.ok().build();
+    }
+
 
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {

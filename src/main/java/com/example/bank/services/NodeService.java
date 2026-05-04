@@ -1,5 +1,6 @@
 package com.example.bank.services;
 
+import com.example.bank.agents.SyncAgent;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.io.*;
@@ -36,12 +38,19 @@ public class NodeService {
     @Value("${app.nodename}")
     private String nodeName;
     private String namingIp;
+    private String ownIP;
     private final String fileDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
     private final RestClient restClient; // Define it here
+
+    private final SyncAgent syncAgent;
 
     // Spring will automatically provide the 'restClient' bean we defined in ClientConfig
     public NodeService(RestClient restClient) {
         this.restClient = restClient;
+        this.syncAgent = new SyncAgent();
+    }
+    public SyncAgent getSyncAgent() {
+        return syncAgent;
     }
 
     private void failureNotifyNamingServ(String nodeName){
@@ -49,6 +58,20 @@ public class NodeService {
         try{
             String result = restClient.post()
                     .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
+                    .retrieve()
+                    .body(String.class);
+            logger.info("Restclient response"+result);
+        } catch (HttpClientErrorException e){
+            logger.error(e.getMessage());
+        }
+    }
+
+    public void sendSyncToNextNode(){
+        logger.info("Sending sync agent to next node");
+        try{
+            String result = restClient.post()
+                    .uri("http://" + ipNextNode + ":8080/node/syncAgent", syncAgent)
+                    .body(syncAgent)
                     .retrieve()
                     .body(String.class);
             logger.info("Restclient response"+result);
@@ -108,7 +131,7 @@ public class NodeService {
                     InetAddress addr = addresses.nextElement();
                     // Check for IPv4 address
                     if (addr.getHostAddress().contains(":")) continue;
-
+                    ownIP = addr.getHostAddress();
                     logger.info(iface.getDisplayName() + " IP: " + addr.getHostAddress());
                 }
             }
@@ -144,8 +167,10 @@ public class NodeService {
                 if (result != null) {
                     fileNamesPrev = Arrays.stream(result.split(" ")).toList();
                 }
-            } catch (HttpClientErrorException e) {
+            } catch (ResourceAccessException e) {
                 failureNotifyNamingServ(previousNode);
+                failureNotifyNamingServ(currentNode);
+                logger.info("failurenotify should have ran");
                 logger.warn(e.getMessage());
             }
         }
@@ -164,8 +189,8 @@ public class NodeService {
                                     .retrieve()
                                     .body(String.class);
                             logger.info("Restclient response"+result);
-                            logger.info(InetAddress.getLocalHost().getHostAddress());// just gives localhost
-                            if(!result.equals(InetAddress.getLocalHost().getHostAddress()) && !(currentNode.equals(previousNode) && currentNode.equals(nextNode))){
+                            logger.info(ownIP);// just gives localhost
+                            if(!result.equals(ownIP) && !(currentNode.equals(previousNode) && currentNode.equals(nextNode))){
                                 logger.info("We are not the owner, so notify the owner and continue");
                                 String result2 = restClient.post()
                                         .uri("http://"+result+":8080/node/notifyDeletion/{fileName}", file.getName())
@@ -176,8 +201,6 @@ public class NodeService {
                             }
                         }catch (HttpClientErrorException e){
                             logger.error(e.getMessage());
-                        } catch (UnknownHostException e) {
-                            throw new RuntimeException(e);
                         }
                         logger.info("We are the owner, so send to previous node and make him owner");
                         sendFileToPreviousNode(file);
@@ -205,7 +228,7 @@ public class NodeService {
                     .retrieve()
                     .body(String.class);
             logger.info("Restclient response"+result);
-        } catch (HttpClientErrorException e){
+        } catch (ResourceAccessException e){
             failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
             failureNotifyNamingServ(previousNode);
             logger.error(e.getMessage());
@@ -217,7 +240,7 @@ public class NodeService {
                     .retrieve()
                     .body(String.class);
             logger.info("Restclient response"+result2);
-        } catch (HttpClientErrorException e){
+        } catch (ResourceAccessException e){
             failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
             failureNotifyNamingServ(nextNode);
             logger.error(e.getMessage());
@@ -362,7 +385,7 @@ public class NodeService {
         ipPreviousNode = ip;
         try {
             sendChangeNext(restClient, ip);
-        } catch (HttpClientErrorException e){
+        } catch (ResourceAccessException e){
             failureNotifyNamingServ(nodeName);
             logger.error(e.getMessage());
         }
@@ -373,7 +396,7 @@ public class NodeService {
         ipNextNode = ip;
         try{
             sendChangePrevious(restClient, ip);
-        } catch (HttpClientErrorException e){
+        } catch (ResourceAccessException e){
             failureNotifyNamingServ(nodeName);
             logger.error(e.getMessage());
         }
