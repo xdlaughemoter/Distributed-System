@@ -70,7 +70,7 @@ public class NodeService {
         logger.info("Sending sync agent to next node");
         try{
             String result = restClient.post()
-                    .uri("http://" + ipNextNode + ":8080/node/syncAgent", syncAgent)
+                    .uri("http://" + ipNextNode + ":8080/node/syncAgent")
                     .body(syncAgent)
                     .retrieve()
                     .body(String.class);
