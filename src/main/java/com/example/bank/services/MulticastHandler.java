@@ -30,6 +30,12 @@ public class MulticastHandler {
     private final int PORT = 4446;
     private final HashingService hashingService = new HashingService();
     private final RestClient restClient; // Define it here
+    private final Map<Integer, String> ipAddresses = new ConcurrentHashMap<>();
+    private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
+    private File ipFile = new File("ipAddresses.json");
+    private File nodeFile = new File("fileToNodeIP.json");
+    private ObjectMapper mapper;
+    public static final Logger logger = LoggerFactory.getLogger(MulticastHandler.class);
     public MulticastHandler(RestClient restClient) {
         this.restClient = restClient;
         mapper = new ObjectMapper();
@@ -164,13 +170,6 @@ public class MulticastHandler {
             e.printStackTrace();
         }
     }
-
-    private final Map<Integer, String> ipAddresses = new ConcurrentHashMap<>();
-    private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
-    private File ipFile = new File("ipAddresses.json");
-    private File nodeFile = new File("fileToNodeIP.json");
-    private ObjectMapper mapper;
-    public static final Logger logger = LoggerFactory.getLogger(MulticastHandler.class);
 
 
     public void sendMulticast(String message) {
