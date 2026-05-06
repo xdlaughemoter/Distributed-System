@@ -1,12 +1,15 @@
 package com.example.bank.services;
 
+import com.example.bank.agents.FailureAgent;
 import com.example.bank.agents.SyncAgent;
+import com.example.bank.config.IpNeighboursManager;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -27,17 +30,21 @@ import java.util.*;
 public class NodeService {
     private final String GROUP_ADDRESS = "230.0.0.0";
     private final int PORT = 4446;
+    private final IpNeighboursManager ipNeighboursManager;
     private String previousNode;
     private String currentNode;
     private String nextNode;
-    private String ipPreviousNode;
-    private String ipNextNode;
     private final HashingService hashingService = new HashingService();
     private int numNodes;
     public static final Logger logger = LoggerFactory.getLogger(NodeService.class);
     @Value("${app.nodename}")
     private String nodeName;
     private String namingIp;
+
+    public String getOwnIP() {
+        return ownIP;
+    }
+
     private String ownIP;
     private final String fileDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
     private final RestClient restClient; // Define it here
@@ -45,39 +52,78 @@ public class NodeService {
     private final SyncAgent syncAgent;
 
     // Spring will automatically provide the 'restClient' bean we defined in ClientConfig
-    public NodeService(RestClient restClient) {
+    public NodeService(IpNeighboursManager ipNeighboursManager, RestClient restClient) {
+        this.ipNeighboursManager = ipNeighboursManager;
         this.restClient = restClient;
-        this.syncAgent = new SyncAgent();
+        this.syncAgent = new SyncAgent(restClient, ipNeighboursManager);
     }
     public SyncAgent getSyncAgent() {
         return syncAgent;
     }
 
-    private void failureNotifyNamingServ(String nodeName){
-        logger.info("Failure notification to naming server");
-        try{
-            String result = restClient.post()
-                    .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
+    private void failureNotifyNamingServ(String failingNodeName){
+        // the plan:
+        //request sent to node
+        //error! failure
+        //construct failing agent
+        //add node id of failing node and current node
+        FailureAgent failureAgent = new FailureAgent(currentNode, failingNodeName);
+        //add file list of failed node (fetched from naming server)
+        //remove failed node from naming server and all its entries in file to node
+        ParameterizedTypeReference<List<Integer>> typeRef = new ParameterizedTypeReference<>() {};
+        List<Integer> hashedFileNameList = restClient.get()
+                .uri("http://" + getNamingIp() + ":8081/naming/{nodename}/getOwnedFiles", failingNodeName)
+                .retrieve()
+                .body(typeRef);
+        //add files again through /file-store on the naming server
+        HashMap<Integer, String> newOwnersOfFiles = new HashMap<>();
+        for (Integer hashedFileName : hashedFileNameList) {
+            String response = restClient.get()
+                    .uri("http://" + getNamingIp() + ":8081/naming/{filehash}/file-store-hash", hashedFileName)
                     .retrieve()
                     .body(String.class);
-            logger.info("Restclient response"+result);
-        } catch (HttpClientErrorException e){
-            logger.error(e.getMessage());
+            newOwnersOfFiles.put(hashedFileName, response);
+
         }
+        //add IP adresses of the new owners and the file name
+        failureAgent.setNewOwnersOfFiles(newOwnersOfFiles);
+        //send to next node, dont run
+        failureAgent.setIpNeighboursManager(ipNeighboursManager);
+        failureAgent.setOwnIP(ownIP);
+        if(nextNode.equals(currentNode)){
+            failureAgent.run();
+        } else {
+            failureAgent.sendFailureToNextNode(restClient);
+        }
+
+
+        //
+        //loop this:
+        //.run()
+        //read file list of curent node
+        //if it has a file that needs to be sent to a new owner:
+        //	check if it is the new owner
+        //	if not check if new owner already has the file through /file-list
+        //	if not, send the file to the new owner through TCP
+        //  remove it from the newownerlist
+        //if we are the current node, terminate the failing agent
+        //send to next node
+
+        // agent: new version, this was old
+//        logger.info("Failure notification to naming server");
+//        try{
+//            String result = restClient.post()
+//                    .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
+//                    .retrieve()
+//                    .body(String.class);
+//            logger.info("Restclient response"+result);
+//        } catch (HttpClientErrorException e){
+//            logger.error(e.getMessage());
+//        }
     }
 
     public void sendSyncToNextNode(){
-        logger.info("Sending sync agent to next node");
-        try{
-            String result = restClient.post()
-                    .uri("http://" + ipNextNode + ":8080/node/syncAgent")
-                    .body(syncAgent)
-                    .retrieve()
-                    .body(String.class);
-            logger.info("Restclient response"+result);
-        } catch (HttpClientErrorException e){
-            logger.error(e.getMessage());
-        }
+        syncAgent.sendSyncToNextNode();
     }
 
     // --- SENDING A FILE (POST) ---
@@ -160,7 +206,7 @@ public class NodeService {
             try {
                 logger.info("Get list of files on previous node");
                 String result = restClient.get()
-                        .uri("http://" + ipPreviousNode + ":8080/node/file-list")
+                        .uri("http://" + ipNeighboursManager.getPrevIP() + ":8080/node/file-list")
                         .retrieve()
                         .body(String.class);
                 logger.info("Restclient response" + result);
@@ -224,7 +270,7 @@ public class NodeService {
         try{
             logger.info("Destroy neighbour mapping");
             String result = restClient.post()
-                    .uri("http://"+ipNextNode+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipPreviousNode)
+                    .uri("http://"+ipNeighboursManager.getNextIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipNeighboursManager.getPrevIP())
                     .retrieve()
                     .body(String.class);
             logger.info("Restclient response"+result);
@@ -236,7 +282,7 @@ public class NodeService {
         }
         try{
             String result2 = restClient.post()
-                    .uri("http://"+ipPreviousNode+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "next", ipNextNode)
+                    .uri("http://"+ipNeighboursManager.getPrevIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "next", ipNeighboursManager.getNextIP())
                     .retrieve()
                     .body(String.class);
             logger.info("Restclient response"+result2);
@@ -263,9 +309,12 @@ public class NodeService {
         // 2. Now run your discovery logic
         discoverNodes();
         distributeFiles();
+        if(nextNode.isBlank()){
+            sendSyncToNextNode();
+        }
     }
 
-    @Scheduled(fixedDelay = 5000) // every 5 seconds
+    @Scheduled(fixedDelay = 500000) // every 500 seconds
     private void distributeFiles(){
         File folder = new File(fileDirectory);
         if (!folder.exists()) {
@@ -288,7 +337,7 @@ public class NodeService {
 
     public void sendFileToPreviousNode(File file){
         logger.info("Send file to previous node through TCP");
-        try (Socket socket = new Socket(ipPreviousNode, 9000);
+        try (Socket socket = new Socket(ipNeighboursManager.getPrevIP(), 9000);
              FileInputStream fis = new FileInputStream(file);
              DataOutputStream dos = new DataOutputStream(socket.getOutputStream())) {
 
@@ -351,6 +400,7 @@ public class NodeService {
             try{
                 logger.info("Replication begin");
                 if(namingIp == null){
+                    logger.info("Naming IP is null");
                     return;
                 }
                 String result = restClient.get()
@@ -382,7 +432,7 @@ public class NodeService {
 
     private void setPreviousNode(String nodeName, String ip, RestClient restClient) {
         previousNode = nodeName;
-        ipPreviousNode = ip;
+        ipNeighboursManager.setPrevIP(ip);
         try {
             sendChangeNext(restClient, ip);
         } catch (ResourceAccessException e){
@@ -393,7 +443,7 @@ public class NodeService {
 
     private void setNextNode(String nodeName, String ip, RestClient restClient) {
         nextNode = nodeName;
-        ipNextNode = ip;
+        ipNeighboursManager.setNextIP(ip);
         try{
             sendChangePrevious(restClient, ip);
         } catch (ResourceAccessException e){
@@ -507,22 +557,6 @@ public class NodeService {
     public void setNamingIp(String namingIp) {
         this.namingIp = namingIp;
     }
-    public String getIpPreviousNode() {
-        return ipPreviousNode;
-    }
-
-    public void setIpPreviousNode(String ipPreviousNode) {
-        this.ipPreviousNode = ipPreviousNode;
-    }
-
-    public String getIpNextNode() {
-        return ipNextNode;
-    }
-
-    public void setIpNextNode(String ipNextNode) {
-        this.ipNextNode = ipNextNode;
-    }
-
     public String getNodeName() {
         return nodeName;
     }

@@ -1,6 +1,8 @@
 package com.example.bank.controllers;
 
+import com.example.bank.agents.FailureAgent;
 import com.example.bank.agents.SyncAgent;
+import com.example.bank.config.IpNeighboursManager;
 import com.example.bank.services.NodeService;
 import com.example.bank.services.HashingService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,7 +20,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
@@ -29,9 +30,11 @@ public class FileController {
     private final NodeService nodeService;
     private final String fileDirectory = System.getProperty("user.dir")+ File.separator + "uploaded_files";
     private final HashingService hashingService = new HashingService();
+    private final IpNeighboursManager ipNeighboursManager;
 
-    public FileController(NodeService nodeService) {
+    public FileController(NodeService nodeService, IpNeighboursManager ipNeighboursManager) {
         this.nodeService = nodeService;
+        this.ipNeighboursManager = ipNeighboursManager;
     }
 
     @GetMapping("/nodename")
@@ -45,6 +48,16 @@ public class FileController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/failureAgent")
+    public ResponseEntity<String> failureAgent(@RequestBody FailureAgent failureAgentReceived) {
+        logger.info("failure agent received");
+        // start a thread
+        failureAgentReceived.setIpNeighboursManager(ipNeighboursManager);
+        failureAgentReceived.setOwnIP(nodeService.getOwnIP());
+        new Thread(failureAgentReceived::run).start();
+        return ResponseEntity.ok().build();
+    }
+
     @PostMapping("/syncAgent")
     public ResponseEntity<String> syncAgent(@RequestBody SyncAgent syncAgentReceived) {
         logger.info("Sync agent received");
@@ -53,6 +66,8 @@ public class FileController {
             logger.info("Sync agent lists not equal");
             localSyncAgent.fileList.putAll(syncAgentReceived.fileList);
             nodeService.sendSyncToNextNode();
+        } else{
+            logger.info("Sync agent equal, no new REST API request sent");
         }
         return ResponseEntity.ok().build();
     }
@@ -66,6 +81,7 @@ public class FileController {
         logger.info(blabal);
         localSyncAgent.fileList.put(blabal,
                 !localSyncAgent.fileList.get(blabal));
+        nodeService.sendSyncToNextNode();
         return ResponseEntity.ok().build();
     }
 
@@ -101,13 +117,13 @@ public class FileController {
     public ResponseEntity<String> setNeighbour(@PathVariable String nodeName, @PathVariable String typeNeighbour, HttpServletRequest request) {
         String ipadd = request.getRemoteAddr();
         if(typeNeighbour.equals("previous")){
-            logger.info("previous node changed from "+ nodeService.getIpPreviousNode() +" to " + ipadd);
+            logger.info("previous node changed from "+ ipNeighboursManager.getPrevIP() +" to " + ipadd);
             nodeService.setPreviousNode(nodeName);
-            nodeService.setIpPreviousNode(ipadd);
+            ipNeighboursManager.setPrevIP(ipadd);
         } else{
-            logger.info("next node changed from "+ nodeService.getIpNextNode() +" to " + ipadd);
+            logger.info("next node changed from "+ ipNeighboursManager.getNextIP() +" to " + ipadd);
             nodeService.setNextNode(nodeName);
-            nodeService.setIpNextNode(ipadd);
+            ipNeighboursManager.setNextIP(ipadd);
         }
         return ResponseEntity.ok().build();
     }
@@ -115,13 +131,13 @@ public class FileController {
     @PostMapping("/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}")
     public ResponseEntity<String> setNeighbourAfterDestroy(@PathVariable String nodeName, @PathVariable String typeNeighbour, @PathVariable String ipadd) {
         if(typeNeighbour.equals("previous")){
-            logger.info("previous node changed from "+ nodeService.getIpPreviousNode() +" to " + ipadd);
+            logger.info("previous node changed from "+ ipNeighboursManager.getPrevIP() +" to " + ipadd);
             nodeService.setPreviousNode(nodeName);
-            nodeService.setIpPreviousNode(ipadd);
+            ipNeighboursManager.setPrevIP(ipadd);
         } else{
-            logger.info("next node changed from "+ nodeService.getIpNextNode() +" to " + ipadd);
+            logger.info("next node changed from "+ ipNeighboursManager.getNextIP() +" to " + ipadd);
             nodeService.setNextNode(nodeName);
-            nodeService.setIpNextNode(ipadd);
+            ipNeighboursManager.setNextIP(ipadd);
         }
         return ResponseEntity.ok().build();
     }
