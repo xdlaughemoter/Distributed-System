@@ -60,7 +60,7 @@ public class NamingController {
         return ResponseEntity.badRequest().body("File was already replicated, hash is duplicate");
     }
 
-    @GetMapping("/{fileName}/file-store-hash")
+    @GetMapping("/{hashFile}/file-store-hash")
     public ResponseEntity<String> determineNodeToStoreHash(@PathVariable int hashFile) {
         logger.info("Request to determine node to store file of name: "+hashFile);
         Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
@@ -130,7 +130,8 @@ public class NamingController {
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
-        multicastHandler.removeIPFromFileToNode(hash);
+        multicastHandler.removeIPFromFileToNodeLazy(hash);
+        multicastHandler.removeIpAddress(hash);
         return ResponseEntity.ok(hashesOfFiles);
     }
 

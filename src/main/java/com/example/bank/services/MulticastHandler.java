@@ -160,6 +160,21 @@ public class MulticastHandler {
             e.printStackTrace();
         }
     }
+
+    public void removeIPFromFileToNodeLazy(int hash){
+        logger.info("Removing ip from file to node lazily");
+        int previousHash = getPreviousHashofNodeHash(hash);
+        String ipCurrent = ipAddresses.get(hash);
+        logger.info("IP current node "+ ipCurrent);
+        fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent));
+        try {
+            // writeValue(File, Object) serializes and saves
+            mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
+            System.out.println("JSON written successfully!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
     public void removeFileToNodeIP(int hash){
         fileToNodeIP.remove(hash);
         try {
