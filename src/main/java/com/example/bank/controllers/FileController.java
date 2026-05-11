@@ -54,7 +54,8 @@ public class FileController {
         // start a thread
         failureAgentReceived.setIpNeighboursManager(ipNeighboursManager);
         failureAgentReceived.setOwnIP(nodeService.getOwnIP());
-        new Thread(failureAgentReceived::run).start();
+        failureAgentReceived.setNodeName(nodeService.getNodeName());
+        new Thread(failureAgentReceived).start();
         return ResponseEntity.ok().build();
     }
 
@@ -73,7 +74,7 @@ public class FileController {
     }
     // test api point
     @PostMapping("/lock")
-    public ResponseEntity<String> syncAgent() {
+    public ResponseEntity<String> syncAgentLock() {
         logger.info("Sync agent received");
         SyncAgent localSyncAgent =  nodeService.getSyncAgent();
         // get the first file and then set it to the opposite

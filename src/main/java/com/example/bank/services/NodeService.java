@@ -67,7 +67,16 @@ public class NodeService {
         //error! failure
         //construct failing agent
         //add node id of failing node and current node
-        FailureAgent failureAgent = new FailureAgent(currentNode, failingNodeName);
+        if(failingNodeName.equals(nextNode)){
+            ipNeighboursManager.setNextIP(null);
+            nextNode=currentNode;
+        }
+        if(failingNodeName.equals(previousNode)){
+            ipNeighboursManager.setPrevIP(null);
+            previousNode = currentNode;
+        }
+        logger.info("Init failure agent with current node: "+currentNode+" and failing node: "+failingNodeName);
+        FailureAgent failureAgent = new FailureAgent(currentNode, failingNodeName, nodeName);
         //add file list of failed node (fetched from naming server)
         //remove failed node from naming server and all its entries in file to node
         ParameterizedTypeReference<List<Integer>> typeRef = new ParameterizedTypeReference<>() {};
@@ -77,22 +86,32 @@ public class NodeService {
                 .body(typeRef);
         //add files again through /file-store on the naming server
         HashMap<Integer, String> newOwnersOfFiles = new HashMap<>();
-        for (Integer hashedFileName : hashedFileNameList) {
-            String response = restClient.get()
-                    .uri("http://" + getNamingIp() + ":8081/naming/{filehash}/file-store-hash", hashedFileName)
-                    .retrieve()
-                    .body(String.class);
-            newOwnersOfFiles.put(hashedFileName, response);
 
+        if(hashedFileNameList != null){
+            logger.info("Looping over file names which need new owners");
+            for (Integer hashedFileName : hashedFileNameList) {
+                logger.info("Hashfile "+hashedFileName);
+                String response = restClient.get()
+                        .uri("http://" + getNamingIp() + ":8081/naming/{filehash}/file-store-hash", hashedFileName)
+                        .retrieve()
+                        .body(String.class);
+                newOwnersOfFiles.put(hashedFileName, response);
+
+            }
         }
+        logger.info("Failure multicast sent");
+        sendMulticast("failure "+failingNodeName);
         //add IP adresses of the new owners and the file name
+        logger.info("Set new owners");
         failureAgent.setNewOwnersOfFiles(newOwnersOfFiles);
         //send to next node, dont run
         failureAgent.setIpNeighboursManager(ipNeighboursManager);
         failureAgent.setOwnIP(ownIP);
         if(nextNode.equals(currentNode)){
+            logger.info("We are the only node so run failure agent");
             failureAgent.run();
         } else {
+            logger.info("Send failure agent, we are not the only node");
             failureAgent.sendFailureToNextNode(restClient);
         }
 
@@ -214,14 +233,14 @@ public class NodeService {
                     fileNamesPrev = Arrays.stream(result.split(" ")).toList();
                 }
             } catch (ResourceAccessException e) {
+                logger.info("Prev node error occured");
                 failureNotifyNamingServ(previousNode);
-                failureNotifyNamingServ(currentNode);
-                logger.info("failurenotify should have ran");
+                logger.info("failurenotify should have ran, error message below");
                 logger.warn(e.getMessage());
             }
         }
 
-        if (files != null) {
+        if (files != null && ipNeighboursManager.getPrevIP()!=null) {
             for (File file : files) {
                 if (file.isFile()) {
                     logger.info("Check file "+file.getName());
@@ -265,6 +284,7 @@ public class NodeService {
         logger.info("Restclient response"+result3);
 
         if(currentNode.equals(previousNode) && currentNode.equals(nextNode)){
+            logger.info("This is the only node, no need for neighbour mapping destroys, exit");
             return;
         }
         try{
@@ -275,8 +295,7 @@ public class NodeService {
                     .body(String.class);
             logger.info("Restclient response"+result);
         } catch (ResourceAccessException e){
-            failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
-            failureNotifyNamingServ(previousNode);
+            failureNotifyNamingServ(nextNode);
             logger.error(e.getMessage());
             return;
         }
@@ -287,8 +306,7 @@ public class NodeService {
                     .body(String.class);
             logger.info("Restclient response"+result2);
         } catch (ResourceAccessException e){
-            failureNotifyNamingServ(currentNode); // current node also failed and needs to dissapear somehow
-            failureNotifyNamingServ(nextNode);
+            failureNotifyNamingServ(previousNode);
             logger.error(e.getMessage());
         }
 
@@ -479,6 +497,23 @@ public class NodeService {
                 // check for correct package start
                 if(!received.startsWith("discover")) {
                     logger.info("Multicast packet didnt start with discover");
+                    if(received.startsWith("failure")){
+                        // check if a name was passed on
+                        String[] parts = received.split(" ");
+                        if(parts.length<=1) {
+                            continue;
+                        }
+                        // get ip adress of sender
+                        String clientIp = packet.getAddress().getHostAddress();
+                        // get name of sender
+                        String receivedNodeName = parts[1];
+                        if (nextNode.equals(receivedNodeName)) {
+                            setNextNode(currentNode);
+                        } else if (previousNode.equals(receivedNodeName)) {
+                            setPreviousNode(currentNode);
+                        }
+                        discoverNodes();
+                    }
                     continue;
                 }
 

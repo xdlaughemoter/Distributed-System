@@ -11,22 +11,18 @@ public class IpNeighboursManager {
     private final AtomicReference<String> ipPrevious = new AtomicReference<>(null);
     private final AtomicReference<String> ipNext = new AtomicReference<>(null);
 
-    // Get the current value (can return null)
     public String getPrevIP() {
         return ipPrevious.get();
     }
-
-    // Change the value at runtime
     public void setPrevIP(String newValue) {
         this.ipPrevious.set(newValue);
     }
     public String getNextIP() {
         return ipNext.get();
     }
-
-    // Change the value at runtime
     public void setNextIP(String newValue) {
         this.ipNext.set(newValue);
     }
+
 
 }

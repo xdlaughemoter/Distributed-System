@@ -4,7 +4,6 @@ import com.example.bank.config.IpNeighboursManager;
 import com.example.bank.services.HashingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -16,30 +15,33 @@ import org.springframework.web.client.RestClient;
 import java.io.File;
 import java.io.Serializable;
 import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.util.Enumeration;
 import java.util.HashMap;
 
 public class FailureAgent implements Serializable, Runnable{
     private final String currentNode;
     private final String failingNode;
 
-    public void setOwnIP(String ownIP) {
-        this.ownIP = ownIP;
-    }
-
     private String ownIP = "hsapwfuawefiopo;ahwefio";
-
-    public void setIpNeighboursManager(IpNeighboursManager ipNeighboursManager) {
-        this.ipNeighboursManager = ipNeighboursManager;
-    }
 
     private IpNeighboursManager ipNeighboursManager;
     public static final Logger logger = LoggerFactory.getLogger(SyncAgent.class);
-    @Value("${app.nodename}")
+
+    public String getNodeName() {
+        return nodeName;
+    }
+
+    public void setNodeName(String nodeName) {
+        this.nodeName = nodeName;
+    }
+
     private String nodeName;
+    private  HashMap<Integer, String> newOwnersOfFiles = new HashMap<>();
+    public FailureAgent(String currentNode, String failingNode, String nodeName) {
+        this.currentNode = currentNode;
+        this.failingNode = failingNode;
+        this.nodeName = nodeName;
+    }
 
     @Override
     public void run() {
@@ -73,6 +75,7 @@ public class FailureAgent implements Serializable, Runnable{
 
         //if we are the current node, terminate the failing agent
         //send to next node
+        logger.info("Is own name "+nodeName+" equal to "+ currentNode);
         if(!currentNode.equals(nodeName)){
             sendFailureToNextNode(restClient);
         }
@@ -103,7 +106,8 @@ public class FailureAgent implements Serializable, Runnable{
     }
 
     public void sendFailureToNextNode(RestClient restClient){
-        logger.info("Sending sync agent to next node");
+
+        logger.info("Sending failure agent to next node");
         try{
             String result = restClient.post()
                     .uri("http://" + ipNeighboursManager.getNextIP() + ":8080/node/syncAgent")
@@ -123,11 +127,12 @@ public class FailureAgent implements Serializable, Runnable{
     public void setNewOwnersOfFiles(HashMap<Integer, String> newOwnersOfFiles) {
         this.newOwnersOfFiles = newOwnersOfFiles;
     }
+    public void setIpNeighboursManager(IpNeighboursManager ipNeighboursManager) {
+        this.ipNeighboursManager = ipNeighboursManager;
+    }
 
-    private  HashMap<Integer, String> newOwnersOfFiles = new HashMap<>();
-    public FailureAgent(String currentNode, String failingNode) {
-        this.currentNode = currentNode;
-        this.failingNode = failingNode;
+    public void setOwnIP(String ownIP) {
+        this.ownIP = ownIP;
     }
 
 
