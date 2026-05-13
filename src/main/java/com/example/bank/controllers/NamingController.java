@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 
+@CrossOrigin(origins = "*", allowedHeaders = "*")
 @RestController
 @RequestMapping("/naming")
 @EnableAsync
@@ -38,7 +39,7 @@ public class NamingController {
     public ResponseEntity<String> determineNodeToStore(@PathVariable String fileName) {
         logger.info("Request to determine node to store file of name: "+fileName);
         int hashFile = hashingService.hashingFunction(fileName);
-        Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
         logger.info(ipAddresses.toString());
         if(ipAddresses.isEmpty()){
             return ResponseEntity.badRequest().body("no ip adresses on naming server");
@@ -53,9 +54,9 @@ public class NamingController {
         }
         logger.info("Node found with smallest hash diff: "+smallestHashDifference);
 
-        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference))){
+        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference).address())){
             logger.info("Not a duplicate, file inserted");
-            return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
+            return ResponseEntity.ok(ipAddresses.get(smallestHashDifference).address());
         }
         return ResponseEntity.badRequest().body("File was already replicated, hash is duplicate");
     }
@@ -63,7 +64,7 @@ public class NamingController {
     @GetMapping("/{hashFile}/file-store-hash")
     public ResponseEntity<String> determineNodeToStoreHash(@PathVariable int hashFile) {
         logger.info("Request to determine node to store file of name: "+hashFile);
-        Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
         logger.info(ipAddresses.toString());
         if(ipAddresses.isEmpty()){
             return ResponseEntity.badRequest().body("no ip adresses on naming server");
@@ -78,9 +79,9 @@ public class NamingController {
         }
         logger.info("Node found with smallest hash diff: "+smallestHashDifference);
 
-        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference))){
+        if(multicastHandler.insertFileToNodeIP(hashFile,ipAddresses.get(smallestHashDifference).address() )){
             logger.info("Not a duplicate, file inserted");
-            return ResponseEntity.ok(ipAddresses.get(smallestHashDifference));
+            return ResponseEntity.ok(ipAddresses.get(smallestHashDifference).address());
         }
         return ResponseEntity.badRequest().body("File was already replicated, hash is duplicate");
     }
@@ -112,26 +113,41 @@ public class NamingController {
     @GetMapping("/{name}/get")
     public ResponseEntity<String> getIPByNode(@PathVariable String name) {
         logger.info("get IP of node "+ name);
-        Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
-        String resultIP = ipAddresses.getOrDefault(hashingService.hashingFunction(name), "error");
-        return ResponseEntity.ok(resultIP);
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
+        MulticastHandler.IpInfo resultIP = ipAddresses.getOrDefault(hashingService.hashingFunction(name), new MulticastHandler.IpInfo("error", "error"));
+        return ResponseEntity.ok(resultIP.address());
+    }
+
+    @GetMapping("/getALlNodes")
+    public ResponseEntity<Map<Integer, MulticastHandler.IpInfo>> getAllNodes() {
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
+
+        return ResponseEntity.ok(ipAddresses);
     }
 
     @GetMapping("/{name}/getOwnedFiles")
     public ResponseEntity<List<Integer>> getFilesOwnedByIP(@PathVariable String name) {
-        logger.info("get owned files of node "+ name);
+        logger.info("get owned files of node " + name);
         int hash = hashingService.hashingFunction(name);
-        Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
-        String resultIP = ipAddresses.getOrDefault(hash, "error");
+
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
+
+        // 1. Get the record, then extract the address string
+        MulticastHandler.IpInfo resultIP = ipAddresses.getOrDefault(hash, new MulticastHandler.IpInfo("error", "error"));
+        String targetAddress = resultIP.address();
+
         Map<Integer, String> fileToNode = multicastHandler.getFileToNodeIP();
+
+        // 2. Filter the map by comparing String to String
         List<Integer> hashesOfFiles = fileToNode.entrySet()
                 .stream()
-                .filter(entry -> Objects.equals(entry.getValue(), resultIP))
+                .filter(entry -> Objects.equals(entry.getValue(), targetAddress)) // Compare String values
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
         multicastHandler.removeIPFromFileToNodeLazy(hash);
         multicastHandler.removeIpAddress(hash);
+
         return ResponseEntity.ok(hashesOfFiles);
     }
 
@@ -139,8 +155,11 @@ public class NamingController {
     public ResponseEntity<String> addIP(@PathVariable String name, HttpServletRequest request) {
         logger.info("Add node "+ name);
         String clientIp = request.getRemoteAddr();
-        Map<Integer, String> ipAddresses = multicastHandler.getIpAddresses();
-        if(ipAddresses.containsValue(clientIp)){
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
+        boolean exists = ipAddresses.values().stream()
+                .anyMatch(info -> info.address().equals(clientIp));
+
+        if (exists) {
             return ResponseEntity.ok("IP already added");
         }
         Integer hash = hashingService.hashingFunction(name);
@@ -148,7 +167,7 @@ public class NamingController {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body("Error! Name " + name + " already in use.");
         }
-        multicastHandler.insertIpAddress(hash, clientIp);
+        multicastHandler.insertIpAddress(hash, new MulticastHandler.IpInfo(clientIp, name));
 
 
         return ResponseEntity.ok("Success! IP adress added: " + ipAddresses.get(hash));

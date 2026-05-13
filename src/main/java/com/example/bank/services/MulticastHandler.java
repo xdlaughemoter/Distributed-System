@@ -30,7 +30,8 @@ public class MulticastHandler {
     private final int PORT = 4446;
     private final HashingService hashingService = new HashingService();
     private final RestClient restClient; // Define it here
-    private final Map<Integer, String> ipAddresses = new ConcurrentHashMap<>();
+    public record IpInfo(String address, String nodeName) {}
+    private final Map<Integer, IpInfo> ipAddresses = new ConcurrentHashMap<>();
     private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
     private File ipFile = new File("ipAddresses.json");
     private File nodeFile = new File("fileToNodeIP.json");
@@ -43,7 +44,8 @@ public class MulticastHandler {
         // Load IP Addresses
         if (ipFile.exists()) {
             try {
-                Map<Integer, String> loadedIps = mapper.readValue(ipFile, new TypeReference<Map<Integer, String>>() {});
+                Map<Integer, IpInfo> loadedIps = mapper.readValue(ipFile, new TypeReference<>() {
+                });
                 this.ipAddresses.putAll(loadedIps);
                 System.out.println("Loaded IP addresses from file.");
             } catch (IOException e) {
@@ -65,14 +67,14 @@ public class MulticastHandler {
 
 
 
-    public Map<Integer, String> getIpAddresses() {
+    public Map<Integer, IpInfo> getIpAddresses() {
         return ipAddresses;
     }
 
     public Map<Integer, String> getFileToNodeIP() {
         return fileToNodeIP;
     }
-    public void insertIpAddress(int hash, String ipAddr){
+    public void insertIpAddress(int hash, IpInfo ipAddr){
         logger.info("Insert IP adress "+ ipAddresses);
         ipAddresses.put(hash, ipAddr);
         try {
@@ -143,14 +145,14 @@ public class MulticastHandler {
     public void removeIPFromFileToNode(int hash){
         logger.info("Change ownership of files of current node to previous node");
         int previousHash = getPreviousHashofNodeHash(hash);
-        String ipPrevious = ipAddresses.get(previousHash);
-        String ipCurrent = ipAddresses.get(hash);
+        IpInfo ipPrevious = ipAddresses.get(previousHash);
+        IpInfo ipCurrent = ipAddresses.get(hash);
         logger.info("IP previous node "+ ipPrevious);
         logger.info("IP current node "+ ipCurrent);
         if(ipPrevious.equals(ipCurrent)){
-            fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent));
+            fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent.address()));
         } else{
-            fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent) ? ipPrevious : value);
+            fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent.address()) ? ipPrevious.address() : value);
         }
         try {
             // writeValue(File, Object) serializes and saves
@@ -164,7 +166,7 @@ public class MulticastHandler {
     public void removeIPFromFileToNodeLazy(int hash){
         logger.info("Removing ip from file to node lazily");
         int previousHash = getPreviousHashofNodeHash(hash);
-        String ipCurrent = ipAddresses.get(hash);
+        String ipCurrent = ipAddresses.get(hash).address();
         logger.info("IP current node "+ ipCurrent);
         fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent));
         try {
@@ -272,7 +274,7 @@ public class MulticastHandler {
                         continue;
                     }
                     int numNodes = ipAddresses.size();
-                    insertIpAddress(hashNodeName, clientIp);
+                    insertIpAddress(hashNodeName, new IpInfo(clientIp, receivedNodeName));
 
                     String result = restClient.post()
                             .uri("http://"+clientIp+":8080/node/discover-response/{numNodes}", numNodes)
