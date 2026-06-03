@@ -1,0 +1,18 @@
+.App {
+  text-align: center;
+}
+
+.items {
+  display: flex;
+  place-items: center;
+  justify-content: center;
+}
+
+.item {
+  margin: 20px;
+  max-height: 200px;
+  max-width: 200px;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 10px 10px 5px black;
+}

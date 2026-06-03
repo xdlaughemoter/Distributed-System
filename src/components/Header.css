@@ -1,0 +1,20 @@
+.container-align {
+    display: flex;
+    justify-content: space-between;
+    width: 100%; /* Ensure the container takes the full width of the screen */
+    padding: 20px;
+    box-sizing: border-box; /* Include padding in the element's total width and height */
+}
+
+.left-aligned, .right-aligned {
+    display: flex;
+    gap: 10px; /* Adds space between the inline elements */
+}
+
+.left-aligned {
+    justify-content: flex-start;
+}
+
+.right-aligned {
+    justify-content: flex-end;
+}

@@ -1,0 +1,1 @@
+scp -i C:/Users/maxet/.ssh/virtua -r src public package.json index.html tsconfig.json tsconfig.node.json vite.config.ts s0256783@143.129.43.59:~/webserver
