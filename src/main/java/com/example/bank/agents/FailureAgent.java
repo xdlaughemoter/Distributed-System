@@ -110,7 +110,7 @@ public class FailureAgent implements Serializable, Runnable{
         logger.info("Sending failure agent to next node");
         try{
             String result = restClient.post()
-                    .uri("http://" + ipNeighboursManager.getNextIP() + ":8080/node/syncAgent")
+                    .uri("http://" + ipNeighboursManager.getNextIP() + ":8080/node/failureAgent")
                     .body(this)
                     .retrieve()
                     .body(String.class);

@@ -104,11 +104,19 @@ public class NodeService {
             logger.info("Looping over file names which need new owners");
             for (Integer hashedFileName : hashedFileNameList) {
                 logger.info("Hashfile "+hashedFileName);
-                String response = restClient.get()
-                        .uri("http://" + getNamingIp() + ":8081/naming/{filehash}/file-store-hash", hashedFileName)
-                        .retrieve()
-                        .body(String.class);
-                newOwnersOfFiles.put(hashedFileName, response);
+                try {
+                    String response = restClient.get()
+                            .uri("http://" + getNamingIp() + ":8081/naming/{filehash}/file-store-hash", hashedFileName)
+                            .retrieve()
+                            .body(String.class);
+                    newOwnersOfFiles.put(hashedFileName, response);
+                } catch (org.springframework.web.client.RestClientResponseException e) {
+                    // This catches 400, 404, 500 etc. and allows the loop to continue to the next file
+                    logger.warn("Naming server rejected hash {}: {} - Skipping this file.", hashedFileName, e.getResponseBodyAsString());
+                } catch (Exception e) {
+                    // Catches network timeouts or other unexpected I/O errors
+                    logger.error("Network error fetching new owner for hash {}: {}", hashedFileName, e.getMessage());
+                }
 
             }
         }
@@ -127,31 +135,6 @@ public class NodeService {
             logger.info("Send failure agent, we are not the only node");
             failureAgent.sendFailureToNextNode(restClient);
         }
-
-
-        //
-        //loop this:
-        //.run()
-        //read file list of curent node
-        //if it has a file that needs to be sent to a new owner:
-        //	check if it is the new owner
-        //	if not check if new owner already has the file through /file-list
-        //	if not, send the file to the new owner through TCP
-        //  remove it from the newownerlist
-        //if we are the current node, terminate the failing agent
-        //send to next node
-
-        // agent: new version, this was old
-//        logger.info("Failure notification to naming server");
-//        try{
-//            String result = restClient.post()
-//                    .uri("http://" + namingIp + ":8081/naming/{nodeName}/failure", nodeName)
-//                    .retrieve()
-//                    .body(String.class);
-//            logger.info("Restclient response"+result);
-//        } catch (HttpClientErrorException e){
-//            logger.error(e.getMessage());
-//        }
     }
 
     public void sendSyncToNextNode(){
@@ -164,22 +147,23 @@ public class NodeService {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(file));
         logger.info("File "+file.getName()+" uploaded to "+ url);
-        try {
-            if(url.equals(InetAddress.getLocalHost().getHostAddress()))
-            return restClient.post()
-                    .uri("http://{ip}:8080/node/receive", url)
-                    .contentType(MediaType.MULTIPART_FORM_DATA)
-                    .body(body)
-                    .retrieve()
-                    .onStatus(HttpStatusCode::isError, (req, res) -> {
-                        //failureNotifyNamingServ(); dont know the name. if server doesnt respond cant get the name anyhow
-                        throw new RuntimeException("Node returned error: " + res.getStatusCode());
-                    })
-                    .body(String.class);
-        } catch (UnknownHostException e) {
-            throw new RuntimeException(e);
+        if(url.equals(ownIP)) {
+            logger.info("Upload to own IP denied");
+            return "nblabla;";
         }
-        return "nblabla;";
+
+        restClient.post()
+            .uri("http://{ip}:8080/node/receive", url)
+            .contentType(MediaType.MULTIPART_FORM_DATA)
+            .body(body)
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, (req, res) -> {
+                //failureNotifyNamingServ(); dont know the name. if server doesnt respond cant get the name anyhow
+                throw new RuntimeException("Node returned error: " + res.getStatusCode());
+            })
+            .body(String.class);
+        return "uploaded";
+
     }
 
     public void sendMulticast(String message) {
@@ -353,7 +337,7 @@ public class NodeService {
 
         // Get all files and folders in the directory
         File[] files = folder.listFiles();
-
+        logger.info("Replication begin");
         if (files != null) {
             for (File file : files) {
                 if (file.isFile()) {
@@ -428,7 +412,6 @@ public class NodeService {
     public void replicateFile(File file){
             String filename = file.getName();
             try{
-                logger.info("Replication begin");
                 if(namingIp == null){
                     logger.info("Naming IP is null");
                     return;
