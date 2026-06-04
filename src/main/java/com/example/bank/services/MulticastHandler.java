@@ -295,6 +295,14 @@ public class MulticastHandler {
                     logger.info(result);
 
                 }
+                if(received.startsWith("failure")) {
+                    String[] parts = received.split(" ");
+                    String receivedNodeName = parts[1];
+                    int hashNodeName = hashingService.hashingFunction(receivedNodeName);
+                    removeIPFromFileToNode(hashNodeName);
+                    removeIpAddress(hashNodeName);
+
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
