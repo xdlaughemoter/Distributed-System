@@ -31,8 +31,9 @@ public class MulticastHandler {
     private final HashingService hashingService = new HashingService();
     private final RestClient restClient; // Define it here
     public record IpInfo(String address, String nodeName) {}
+    public record FileInfo(String address, String fileName) {}
     private final Map<Integer, IpInfo> ipAddresses = new ConcurrentHashMap<>();
-    private final Map<Integer, String> fileToNodeIP = new ConcurrentHashMap<>();
+    private final Map<Integer, FileInfo> fileToNodeIP = new ConcurrentHashMap<>();
     private File ipFile = new File("ipAddresses.json");
     private File nodeFile = new File("fileToNodeIP.json");
     private ObjectMapper mapper;
@@ -55,7 +56,7 @@ public class MulticastHandler {
 
         if (nodeFile.exists()) {
             try {
-                Map<Integer, String> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, String>>() {});
+                Map<Integer, FileInfo> loadedNodes = mapper.readValue(nodeFile, new TypeReference<Map<Integer, FileInfo>>() {});
                 this.fileToNodeIP.putAll(loadedNodes);
                 System.out.println("Loaded node mappings from file.");
             } catch (IOException e) {
@@ -71,7 +72,7 @@ public class MulticastHandler {
         return ipAddresses;
     }
 
-    public Map<Integer, String> getFileToNodeIP() {
+    public Map<Integer, FileInfo> getFileToNodeIP() {
         return fileToNodeIP;
     }
     public void insertIpAddress(int hash, IpInfo ipAddr){
@@ -86,12 +87,12 @@ public class MulticastHandler {
         }
 
     }
-    public boolean insertFileToNodeIP(int hash, String ipAddr){
+    public boolean insertFileToNodeIP(int hash, String ipAddr, String fileName){
         if (fileToNodeIP.containsKey(hash)){
             return false;
         }
         logger.info("File added with owner "+ ipAddr);
-        fileToNodeIP.put(hash, ipAddr);
+        fileToNodeIP.put(hash, new FileInfo(ipAddr, fileName));
         try {
             // writeValue(File, Object) serializes and saves
             mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
@@ -142,24 +143,35 @@ public class MulticastHandler {
         }
         return higherHash;
     }
-    public void removeIPFromFileToNode(int hash){
+    public void removeIPFromFileToNode(int hash) {
         logger.info("Change ownership of files of current node to previous node");
         int previousHash = getPreviousHashofNodeHash(hash);
         IpInfo ipPrevious = ipAddresses.get(previousHash);
         IpInfo ipCurrent = ipAddresses.get(hash);
-        logger.info("IP previous node "+ ipPrevious);
-        logger.info("IP current node "+ ipCurrent);
-        if(ipPrevious.equals(ipCurrent)){
-            fileToNodeIP.values().removeIf(value -> value.equals(ipCurrent.address()));
-        } else{
-            fileToNodeIP.replaceAll((key, value) -> value.equals(ipCurrent.address()) ? ipPrevious.address() : value);
+
+        logger.info("IP previous node " + ipPrevious);
+        logger.info("IP current node " + ipCurrent);
+
+        if (ipPrevious.equals(ipCurrent)) {
+            // Use the record's accessor (ipAddress()) to check for removal
+            fileToNodeIP.values().removeIf(info -> info.address().equals(ipCurrent.address()));
+        } else {
+            // Records are immutable; we must return a new record instance
+            fileToNodeIP.replaceAll((key, info) -> {
+                if (info.address().equals(ipCurrent.address())) {
+                    // Return a new record with the previous IP and existing metadata
+                    // Replace 'info.fileName()' with whatever other fields your record has
+                    return new FileInfo(ipPrevious.address(), info.fileName());
+                }
+                return info;
+            });
         }
+
         try {
-            // writeValue(File, Object) serializes and saves
             mapper.writerWithDefaultPrettyPrinter().writeValue(nodeFile, fileToNodeIP);
             System.out.println("JSON written successfully!");
         } catch (IOException e) {
-            e.printStackTrace();
+            logger.error("Failed to write updated file mapping to JSON", e);
         }
     }
 

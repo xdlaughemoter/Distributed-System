@@ -54,7 +54,7 @@ public class NamingController {
         }
         logger.info("Node found with smallest hash diff: "+smallestHashDifference);
 
-        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference).address())){
+        if(multicastHandler.insertFileToNodeIP(hashFile, ipAddresses.get(smallestHashDifference).address(), fileName)){
             logger.info("Not a duplicate, file inserted");
             return ResponseEntity.ok(ipAddresses.get(smallestHashDifference).address());
         }
@@ -79,7 +79,7 @@ public class NamingController {
         }
         logger.info("Node found with smallest hash diff: "+smallestHashDifference);
 
-        if(multicastHandler.insertFileToNodeIP(hashFile,ipAddresses.get(smallestHashDifference).address() )){
+        if(multicastHandler.insertFileToNodeIP(hashFile,ipAddresses.get(smallestHashDifference).address(), hashFile+"" )){
             logger.info("Not a duplicate, file inserted");
             return ResponseEntity.ok(ipAddresses.get(smallestHashDifference).address());
         }
@@ -91,14 +91,14 @@ public class NamingController {
     public ResponseEntity<String> getNodeWhichHasFile(@PathVariable String file) {
         logger.info("Search which node has file: "+file);
         int hash = hashingService.hashingFunction(file);
-        Map<Integer, String> fileToNodeIP = multicastHandler.getFileToNodeIP();
+        Map<Integer, MulticastHandler.FileInfo> fileToNodeIP = multicastHandler.getFileToNodeIP();
         if(!fileToNodeIP.containsKey(hash)){
             return ResponseEntity.notFound().build();
         }
-        String ip = fileToNodeIP.get(hashingService.hashingFunction(file));
+        MulticastHandler.FileInfo ip = fileToNodeIP.get(hashingService.hashingFunction(file));
         logger.info("Node "+ip+" has the file");
 
-        return ResponseEntity.ok(ip);
+        return ResponseEntity.ok(ip.address());
     }
 
     @DeleteMapping("/{name}/remove-node")
@@ -125,6 +125,7 @@ public class NamingController {
         return ResponseEntity.ok(ipAddresses);
     }
 
+    // used in the failure
     @GetMapping("/{name}/getOwnedFiles")
     public ResponseEntity<List<Integer>> getFilesOwnedByIP(@PathVariable String name) {
         logger.info("get owned files of node " + name);
@@ -135,20 +136,48 @@ public class NamingController {
         // 1. Get the record, then extract the address string
         MulticastHandler.IpInfo resultIP = ipAddresses.getOrDefault(hash, new MulticastHandler.IpInfo("error", "error"));
         String targetAddress = resultIP.address();
-
-        Map<Integer, String> fileToNode = multicastHandler.getFileToNodeIP();
+        logger.info("First instance of .address()");
+        Map<Integer, MulticastHandler.FileInfo> fileToNode = multicastHandler.getFileToNodeIP();
 
         // 2. Filter the map by comparing String to String
         List<Integer> hashesOfFiles = fileToNode.entrySet()
+
                 .stream()
-                .filter(entry -> Objects.equals(entry.getValue(), targetAddress)) // Compare String values
+
+                .filter(entry -> Objects.equals(entry.getValue().address(), targetAddress)) // Compare String values
+
                 .map(Map.Entry::getKey)
+
                 .collect(Collectors.toList());
 
-        multicastHandler.removeIPFromFileToNodeLazy(hash);
-        multicastHandler.removeIpAddress(hash);
+//        multicastHandler.removeIPFromFileToNodeLazy(hash);
+//        multicastHandler.removeIpAddress(hash);
 
         return ResponseEntity.ok(hashesOfFiles);
+    }
+
+    // used by gui
+    @GetMapping("/{name}/getOwnedFilesNormal")
+    public ResponseEntity<List<String>> getFilesOwnedByIPNoRemove(@PathVariable String name) {
+        logger.info("get owned files of node " + name);
+        int hash = hashingService.hashingFunction(name);
+
+        Map<Integer, MulticastHandler.IpInfo> ipAddresses = multicastHandler.getIpAddresses();
+
+        // 1. Get the record, then extract the address string
+        MulticastHandler.IpInfo resultIP = ipAddresses.getOrDefault(hash, new MulticastHandler.IpInfo("error", "error"));
+        String targetAddress = resultIP.address();
+
+        Map<Integer, MulticastHandler.FileInfo> fileToNode = multicastHandler.getFileToNodeIP();
+
+        // 2. Filter the map by comparing String to String
+        List<String> fileNames = fileToNode.values()
+                .stream()
+                .filter(info -> Objects.equals(info.address(), targetAddress))
+                .map(MulticastHandler.FileInfo::fileName) // Use the record's accessor for the name
+                .toList();
+
+        return ResponseEntity.ok(fileNames);
     }
 
     @PostMapping("/{name}/add")
@@ -181,6 +210,15 @@ public class NamingController {
         multicastHandler.removeIpAddress(hashFailed);
 
         return ResponseEntity.ok("Success! Node deleted ");
+    }
+
+    @PostMapping("/{name}/addNode/{ipadress}")
+    public ResponseEntity<String> failureNodeDelete(@PathVariable String name, @PathVariable String ipadress) {
+        logger.info("Add node of name "+ name);
+        logger.info("Add node of ip adress "+ ipadress);
+        multicastHandler.insertIpAddress(hashingService.hashingFunction(name), new MulticastHandler.IpInfo(ipadress, name));
+
+        return ResponseEntity.ok("Success! Node added ");
     }
 
 
