@@ -32,6 +32,19 @@ public class NodeService {
     private final int PORT = 4446;
     private final IpNeighboursManager ipNeighboursManager;
     private String previousNode;
+
+    public String getPreviousNode() {
+        return previousNode;
+    }
+
+    public String getCurrentNode() {
+        return currentNode;
+    }
+
+    public String getNextNode() {
+        return nextNode;
+    }
+
     private String currentNode;
     private String nextNode;
     private final HashingService hashingService = new HashingService();
@@ -154,7 +167,7 @@ public class NodeService {
         try {
             if(url.equals(InetAddress.getLocalHost().getHostAddress()))
             return restClient.post()
-                    .uri("http://{ip}:8080/node/receive", url) // Assuming port 8080
+                    .uri("http://{ip}:8080/node/receive", url)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(body)
                     .retrieve()
@@ -326,7 +339,6 @@ public class NodeService {
         }
         // 2. Now run your discovery logic
         discoverNodes();
-        distributeFiles();
         if(nextNode.isBlank()){
             sendSyncToNextNode();
         }
@@ -542,6 +554,8 @@ public class NodeService {
                     } catch (HttpClientErrorException e){
                         logger.error(e.getMessage());
                     }
+
+                    distributeFiles();
 
                     continue;
                 }

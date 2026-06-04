@@ -19,9 +19,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
+@CrossOrigin(origins = "*", allowedHeaders = "*")
 @RestController
 @RequestMapping("/node")
 @EnableAsync
@@ -168,6 +171,15 @@ public class FileController {
                 .collect(Collectors.joining(" "));
         logger.info("Returned filename list "+fileNames);
         return ResponseEntity.ok(fileNames);
+    }
+
+    @GetMapping("/neighbours")
+    public ResponseEntity<List<String>> getNeighbours() {
+        logger.info("Neighbours");
+        List<String> neighbours = new ArrayList<>();
+        neighbours.add(nodeService.getPreviousNode());
+        neighbours.add(nodeService.getNextNode());
+        return ResponseEntity.ok(neighbours);
     }
 
     @PostMapping("/receive")
