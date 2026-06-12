@@ -55,6 +55,8 @@ public class FailureAgent implements Serializable, Runnable{
         // Get all files and folders in the directory
         File[] files = folder.listFiles();
 
+        logger.info("Files found in folder ");
+
         HashingService hashingService = new HashingService();
 
         //if it has a file that needs to be sent to a new owner:
@@ -77,6 +79,7 @@ public class FailureAgent implements Serializable, Runnable{
         //send to next node
         logger.info("Is own name "+nodeName+" equal to "+ currentNode);
         if(!currentNode.equals(nodeName)){
+            logger.info("Send failure to next node");
             sendFailureToNextNode(restClient);
         }
 

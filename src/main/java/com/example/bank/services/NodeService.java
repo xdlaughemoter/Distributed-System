@@ -81,11 +81,11 @@ public class NodeService {
         //construct failing agent
         //add node id of failing node and current node
         if(failingNodeName.equals(nextNode)){
-            ipNeighboursManager.setNextIP(null);
+            ipNeighboursManager.setNextIP(ownIP);
             nextNode=currentNode;
         }
         if(failingNodeName.equals(previousNode)){
-            ipNeighboursManager.setPrevIP(null);
+            ipNeighboursManager.setPrevIP(ownIP);
             previousNode = currentNode;
         }
         logger.info("Init failure agent with current node: "+currentNode+" and failing node: "+failingNodeName);
@@ -284,28 +284,80 @@ public class NodeService {
             logger.info("This is the only node, no need for neighbour mapping destroys, exit");
             return;
         }
-        try{
-            logger.info("Destroy neighbour mapping");
-            String result = restClient.post()
-                    .uri("http://"+ipNeighboursManager.getNextIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipNeighboursManager.getPrevIP())
-                    .retrieve()
-                    .body(String.class);
-            logger.info("Restclient response"+result);
-        } catch (ResourceAccessException e){
-            failureNotifyNamingServ(nextNode);
-            logger.error(e.getMessage());
-            return;
+        logger.info("Init mapping destroy ");
+        // if we are our prev node is the same as our own node we are the beginning node, so the next node
+        // must also become the beginning node by making their own node name their prev node IP
+        if(!previousNode.equals(nodeName)) {
+            try {
+                logger.info("Destroy neighbour mapping");
+                String result = restClient.post()
+                        .uri("http://" + ipNeighboursManager.getNextIP() + ":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "previous", ipNeighboursManager.getPrevIP())
+                        .retrieve()
+                        .body(String.class);
+                logger.info("Restclient response" + result);
+            } catch (HttpClientErrorException.NotFound e) {
+
+                logger.error("404 Not Found: {}", e.getResponseBodyAsString());
+            } catch (Exception e) {
+                logger.info("Init failure notify naming serv 1");
+                failureNotifyNamingServ(nextNode);
+                logger.error(e.getMessage());
+            }
         }
-        try{
-            String result2 = restClient.post()
-                    .uri("http://"+ipNeighboursManager.getPrevIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "next", ipNeighboursManager.getNextIP())
-                    .retrieve()
-                    .body(String.class);
-            logger.info("Restclient response"+result2);
-        } catch (ResourceAccessException e){
-            failureNotifyNamingServ(previousNode);
-            logger.error(e.getMessage());
+        else{
+            logger.info("Prev node == this node");
+            try {
+                logger.info("Destroy neighbour mapping");
+                String result = restClient.post()
+                        .uri("http://" + ipNeighboursManager.getNextIP() + ":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "previous", ipNeighboursManager.getNextIP() )
+                        .retrieve()
+                        .body(String.class);
+                logger.info("Restclient response" + result);
+            } catch (HttpClientErrorException.NotFound e) {
+
+                logger.error("404 Not Found: {}", e.getResponseBodyAsString());
+            } catch (Exception e) {
+                logger.info("Init failure notify naming serv 1");
+                failureNotifyNamingServ(nextNode);
+                logger.error(e.getMessage());
+            }
         }
+        logger.info("Init mapping destroy 2");
+        if(!nextNode.equals(nodeName)){
+            try{
+                String result2 = restClient.post()
+                        .uri("http://"+ipNeighboursManager.getPrevIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", nextNode, "next", ipNeighboursManager.getNextIP())
+                        .retrieve()
+                        .body(String.class);
+                logger.info("Restclient response"+result2);
+            } catch (HttpClientErrorException.NotFound e) {
+
+                logger.error("404 Not Found: {}", e.getResponseBodyAsString());
+            } catch (Exception  e){
+                logger.info("Init failure notify naming serv 2");
+                failureNotifyNamingServ(previousNode);
+                logger.error(e.getMessage());
+            }
+        } else{
+            logger.info("Next node == this node");
+            try{
+                String result2 = restClient.post()
+                        .uri("http://"+ipNeighboursManager.getPrevIP()+":8080/node/neighbour-mapping-destroy/{nodeName}/{typeNeighbour}/{ipadd}", previousNode, "next", ipNeighboursManager.getPrevIP())
+                        .retrieve()
+                        .body(String.class);
+                logger.info("Restclient response"+result2);
+            } catch (HttpClientErrorException.NotFound e) {
+
+                logger.error("404 Not Found: {}", e.getResponseBodyAsString());
+            } catch (Exception  e){
+                logger.info("Init failure notify naming serv 2");
+                failureNotifyNamingServ(previousNode);
+                logger.error(e.getMessage());
+            }
+        }
+
+
+
 
     }
 
@@ -423,7 +475,7 @@ public class NodeService {
                 logger.info("File replicated to "+result);
                 uploadFile(result, file);
             } catch (HttpClientErrorException e){
-                logger.warn(e.getMessage());
+//                logger.warn(e.getMessage());
             }
         }
 
@@ -507,7 +559,6 @@ public class NodeService {
                         } else if (previousNode.equals(receivedNodeName)) {
                             setPreviousNode(currentNode);
                         }
-                        discoverNodes();
                     }
                     continue;
                 }
